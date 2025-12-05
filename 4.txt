@@ -1,0 +1,96 @@
+// ==UserScript==
+// @name         Robux Testing 2
+// @namespace    http://tampermonkey.net/
+// @version      0.1
+// @description  try to take over the world!
+// @author       You
+// @match        https://www.roblox.com/*
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=roblox.com
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const rbxBal = localStorage.getItem("rbxBal") || 5364120;
+    localStorage.setItem("rbxBal", rbxBal);
+
+    let bal = localStorage.getItem("rbxBal");
+    let amt = bal;
+
+    function numberWithCommas(x) {
+        return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    }
+    const formatNumber = (n) => {
+        if (n < 1000) {
+            return n.toString();
+        }
+        if (n > 999 && n < 1000000) {
+            return Math.floor(n / 1000) + "K+";
+        }
+        if (n > 999999 && n < 1000000000) {
+            return (Math.floor(n / 1000000 * 10) / 10).toFixed(1) + "M+";
+        }
+        if (n > 999999999) {
+            return (Math.floor(n / 1000000000 * 10) / 10).toFixed(1) + "B+";
+        }
+    };
+
+    function changeRobux() {
+        const rbx_amt = document.querySelector('#nav-robux-amount');
+        if (rbx_amt) {
+            if (rbx_amt.textContent !== (formatNumber(amt))) {
+                rbx_amt.textContent = (formatNumber(amt));
+            }
+        }
+    };
+    //Mutation Observor for changing Robux amount
+    function observeDOMChanges() {
+        const targetNode = document.body;
+        const config = {
+            childList: true,
+            subtree: true,
+            characterData: true,
+        };
+        const domObserver = new MutationObserver(() => {
+            changeRobux();
+        });
+        domObserver.observe(targetNode, config);
+    }
+
+    observeDOMChanges();
+
+    const domObserverRobux = new MutationObserver(() => {
+        const rbx_bal = document.querySelector('#nav-robux-balance');
+        if (rbx_bal) {
+            if (rbx_bal.textContent !== (`${numberWithCommas(bal)}`)) {
+                rbx_bal.textContent = (`${numberWithCommas(bal)}`);
+            }
+        }
+    });
+
+    domObserverRobux.observe(document, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+    });
+
+    if (window.location.href !== "https://www.roblox.com/transactions") return;
+
+    const setTransactions = setInterval(() => {
+        const trans_elm = document.querySelector('div.balance-label.icon-robux-container');
+        if (!trans_elm) return;
+
+        const trans_bal = document.createElement('div');
+        trans_bal.className = 'balance-label icon-robux-container';
+        trans_bal.innerHTML = `
+      <span>My Balance: <span class="icon-robux-16x16"></span>${numberWithCommas(bal)}</span>
+      <a class="btn-growth-md btn-more" href="https://www.roblox.com/upgrades/robux">Buy Robux</a>
+    `;
+
+        trans_elm.parentNode.appendChild(trans_bal);
+        trans_elm.parentNode.removeChild(trans_elm);
+
+        clearInterval(setTransactions);
+    }, 0);
+})();

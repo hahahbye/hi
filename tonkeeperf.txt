@@ -1,0 +1,34 @@
+(function removeElements() {
+    const selectors = [
+        "/html/body/div[1]/div/div[1]/div[2]/div[1]/div[3]/div[2]/div/div[2]",
+        "/html/body/div[1]/div/div[1]/div[1]/div[1]/div/div[1]",
+        "/html/body/div[1]/div/div[2]/div[2]/table/tbody/tr[2]/td[1]/div/div[2]",
+        "/html/body/div[1]/div/div[1]/div[2]/div[1]/div[3]/div/div/div",
+        "/html/body/div[1]/div/div[1]/div[1]/div[1]/div/div[1]",
+    "/html/body/div[1]/div/div[1]/div[2]/div[1]/div[3]/div/div/div",
+    "/html/body/div[1]/div/div[1]/div[1]/div[1]/div/div[1]"
+    ];
+
+    function deleteElements() {
+        selectors.forEach(xpath => {
+            try {
+                const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                if (element) {
+                    element.remove();
+                    console.log(Removed element: ${xpath});
+                }
+            } catch (error) {
+                console.error(Error removing element at ${xpath}:, error);
+            }
+        });
+    }
+
+    // Run deletion every 20ms
+    const interval = setInterval(deleteElements, 20);
+
+    // Stop the script after 10 seconds (adjust if needed)
+    setTimeout(() => {
+        clearInterval(interval);
+        console.log("Stopping element removal script.");
+    }, 10000);
+})();

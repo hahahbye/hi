@@ -1,0 +1,274 @@
+// ==UserScript==
+// @name         Number Multiplier with XPath Fast Multi
+// @namespace    http://tampermonkey.net/
+// @version      0.26
+// @description  Multiplies specific numbers by 16473.74 instantly using XPath
+// @author       You
+// @match        *://*/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const processedElements = new WeakMap();
+
+    // Function to get element by XPath
+    function getElementByXPath(path) {
+        return document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+    }
+
+    // Function to process and multiply the number
+    function multiplyNumber(element, path) {
+        if (!element || processedElements.has(element)) return;
+
+        let text = element.innerHTML.trim();
+        let number;
+        let isDollarParentheses = false;
+        let isDollar = false;
+        let isCoin = false;
+
+        // Handle specific cases first
+        if (path === "/html/body/main/section[3]/div[2]/div[1]/div/div/div[3]" ||
+            path === "/html/body/main/section[3]/div[2]/div[3]/div/div/div[1]/a/span" ||
+            path === "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[8]/div[2]/span/div/a") {
+            const numberMatch = text.match(/\$([-+]?[0-9]*\.?[0-9]+)/);
+            if (numberMatch) {
+                number = parseFloat(numberMatch[1]);
+                if (!isNaN(number) && number < 1000) {
+                    const result = number * 16473.74;
+                    const formattedResult = result.toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    });
+                    element.innerHTML = text.replace(numberMatch[0], `$${formattedResult}`);
+                    processedElements.set(element, true);
+                    return;
+                }
+            }
+        } else if (path === "/html/body/main/section[3]/div[2]/div[1]/div/div/div[2]/div/div") {
+            const parts = text.split('<b>.</b>');
+            if (parts.length === 2) {
+                number = parseFloat(parts[0].replace(/<[^>]+>/g, '') + '.' + parts[1].match(/^[0-9]+/)[0]);
+                if (!isNaN(number) && number < 1000) {
+                    const result = number * 16473.74;
+                    const formattedResult = result.toLocaleString('en-US', {
+                        minimumFractionDigits: 8,
+                        maximumFractionDigits: 8
+                    });
+                    const decimalPart = result.toFixed(8).split('.')[1];
+                    element.innerHTML = `${Math.floor(result)}<b>.</b>${decimalPart} ETH`;
+                    processedElements.set(element, true);
+                    return;
+                }
+            }
+        }
+
+        // Handle ($X.XX) format explicitly
+        if (text.startsWith('($') && text.endsWith(')')) {
+            const numberMatch = text.match(/\$([-+]?[0-9]*\.?[0-9]+)/);
+            if (numberMatch) {
+                number = parseFloat(numberMatch[1]);
+                isDollarParentheses = true;
+            }
+        }
+        // Special handling for LTC within <strong> tags
+        else if (path === "/html/body/div[2]/div[2]/div/div[6]/div[1]/div" || path === "/html/body/div[2]/div[2]/div/div[6]/div[3]") {
+            const strongElements = element.querySelectorAll('strong');
+            strongElements.forEach(strong => {
+                if (processedElements.has(strong)) return;
+                const strongText = strong.innerHTML.trim();
+                const numberMatch = strongText.match(/[-+]?[0-9]*\.?[0-9]+/);
+                if (numberMatch) {
+                    const number = parseFloat(numberMatch[0]);
+                    if (!isNaN(number) && number < 1000) {
+                        const result = number * 16473.74;
+                        const formattedResult = result.toLocaleString('en-US', {
+                            minimumFractionDigits: 8,
+                            maximumFractionDigits: 8
+                        });
+                        strong.textContent = `${formattedResult} LTC`;
+                        processedElements.set(strong, true);
+                    }
+                }
+            });
+            processedElements.set(element, true);
+            return;
+        }
+        // Special handling for Estimated Value Sent in <h4> or Amount Transacted in <li>
+        else if (path === "/html/body/div[2]/div[2]/div/div[6]/div[5]/h4" || path === "/html/body/div[2]/div[2]/div/div[1]/ul/li[1]") {
+            const numberMatch = text.match(/([-+]?[0-9]*\.?[0-9]+)\s*LTC/);
+            if (numberMatch) {
+                number = parseFloat(numberMatch[1]);
+                if (!isNaN(number) && number < 1000) {
+                    const result = number * 16473.74;
+                    const formattedResult = result.toLocaleString('en-US', {
+                        minimumFractionDigits: 8,
+                        maximumFractionDigits: 8
+                    });
+                    element.innerHTML = text.replace(numberMatch[0], `${formattedResult} LTC`);
+                    processedElements.set(element, true);
+                    return;
+                }
+            }
+        }
+        // Handle split number with <b>.</b> (e.g., ETH)
+        else if (text.includes('<b>.</b>')) {
+            const parts = text.split('<b>.</b>');
+            if (parts.length === 2) {
+                number = parseFloat(parts[0] + '.' + parts[1].match(/^[0-9]+/)[0]);
+                text = parts[0] + '<b>.</b>' + parts[1];
+                isCoin = true;
+            }
+        }
+        // Handle plain number with ETH/LTC suffix or regular $X.XX
+        else {
+            const numberMatch = text.match(/\$?([-+]?[0-9]*\.?[0-9]+)(?:\s*(ETH|LTC))?/);
+            if (!numberMatch) return;
+            number = parseFloat(numberMatch[1]);
+            isDollar = text.startsWith('$') && !text.startsWith('($');
+            isCoin = text.includes('ETH') || text.includes('LTC') || (!isDollar && text.includes('.'));
+            text = numberMatch[0];
+        }
+
+        if (!isNaN(number) && number < 1000) {
+            const result = number * 16473.74;
+            const specialPath = "/html/body/div/div[1]/div[3]/div[1]/div[2]/div/div[1]/div[2]/div/div[1]/div/div/div[11]/div[2]/div/div[2]/div/div[2]/div[2]/div/div[1]/div[6]/div/div/div/span";
+            const isTablePath = path.startsWith('/html/body/main/section[3]/div[4]/div[1]/div/div[2]/table/tbody/tr[') && path.endsWith('/td[12]/span[1]');
+            const decimals = (path === specialPath) ? 2 : (isCoin ? 8 : 2);
+            const formattedResult = result.toLocaleString('en-US', {
+                minimumFractionDigits: decimals,
+                maximumFractionDigits: decimals
+            });
+
+            if (isDollarParentheses) {
+                element.textContent = `($${formattedResult})`;
+            } else if (isDollar) {
+                element.textContent = `$${formattedResult}`;
+            } else if (text.includes('<b>.</b>')) {
+                const parts = text.split('<b>.</b>');
+                const decimalPart = result.toFixed(decimals).split('.')[1];
+                element.innerHTML = `${Math.floor(result)}<b>.</b>${decimalPart} ${parts[1].replace(/^[0-9]+/, '')}`;
+            } else if (text.includes('ETH') && isTablePath) {
+                element.textContent = `${formattedResult} ETH`;
+            } else if (text.includes('ETH')) {
+                element.textContent = `${formattedResult} ETH`;
+            } else if (text.includes('LTC')) {
+                element.textContent = `${formattedResult} LTC`;
+            } else {
+                element.textContent = formattedResult;
+            }
+            processedElements.set(element, true);
+        }
+    }
+
+    // Generate paths for table rows 1-25
+    const tablePaths = Array.from({ length: 25 }, (_, i) =>
+        `/html/body/main/section[3]/div[4]/div[1]/div/div[2]/table/tbody/tr[${i + 1}]/td[12]/span[1]`
+    );
+
+    // Function to process all elements
+    function processElements(attempts = 2, delay = 50) {
+        const paths = [
+            "/html/body/div/div[1]/div[3]/div[1]/div[2]/div/div[1]/div[2]/div/div[1]/div/div/div[11]/div[2]/div/div[2]/div/div[2]/div[2]/div/div[1]/div[5]",
+            "/html/body/div/div[1]/div[3]/div[1]/div[2]/div/div[1]/div[2]/div/div[1]/div/div/div[11]/div[2]/div/div[2]/div/div[2]/div[2]/div/div[1]/div[6]/div/div/div/span",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[9]/div[2]/span/div/a",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[9]/div[2]/span/div/span",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[9]/div[2]/span/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[5]/div[2]/div/div/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[5]/div[2]/div/div/div/span[3]",
+            "/html/body/div[2]/div[2]/div/div[6]/div[1]/div",
+            "/html/body/div[2]/div[2]/div/div[6]/div[3]",
+            "/html/body/div[2]/div[2]/div/div[6]/div[5]/h4",
+            "/html/body/div[2]/div[2]/div/div[1]/ul/li[1]",
+            "//*[@id=\"ContentPlaceHolder1_spanValue\"]/div/span[1]",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[10]/div[2]/span/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[8]/div[2]/span/div/a",
+            "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[8]/div[2]/span/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[4]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[3]",
+            "/html/body/main/section[3]/div[2]/div[1]/div/div/div[3]",
+            "/html/body/main/section[3]/div[2]/div[1]/div/div/div[2]/div/div",
+            "/html/body/main/section[3]/div[2]/div[3]/div/div/div[1]/a/span",
+            ...tablePaths
+        ];
+
+        let found = false;
+        paths.forEach(path => {
+            const element = getElementByXPath(path);
+            if (element) {
+                multiplyNumber(element, path);
+                found = true;
+            }
+        });
+
+        if (found || attempts <= 0) return true;
+        setTimeout(() => processElements(attempts - 1, delay), delay);
+        return false;
+    }
+
+    // Immediate processing
+    function startProcessing() {
+        requestAnimationFrame(() => {
+            processElements(2, 50);
+        });
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        startProcessing();
+    } else {
+        document.addEventListener('DOMContentLoaded', () => {
+            startProcessing();
+        }, { once: true });
+    }
+
+    // Enhanced observer for pending content
+    const observer = new MutationObserver(() => {
+        const paths = [
+            "/html/body/div/div[1]/div[3]/div[1]/div[2]/div/div[1]/div[2]/div/div[1]/div/div/div[11]/div[2]/div/div[2]/div/div[2]/div[2]/div/div[1]/div[5]",
+            "/html/body/div/div[1]/div[3]/div[1]/div[2]/div/div[1]/div[2]/div/div[1]/div/div/div[11]/div[2]/div/div[2]/div/div[2]/div[2]/div/div[1]/div[6]/div/div/div/span",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[9]/div[2]/span/div/a",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[9]/div[2]/span/div/span",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[9]/div[2]/span/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[5]/div[2]/div/div/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[5]/div[2]/div/div/div/span[2]",
+            "/html/body/div[2]/div[2]/div/div[6]/div[1]/div",
+            "/html/body/div[2]/div[2]/div/div[6]/div[3]",
+            "/html/body/div[2]/div[2]/div/div[6]/div[5]/h4",
+            "/html/body/div[2]/div[2]/div/div[1]/ul/li[1]",
+            "//*[@id=\"ContentPlaceHolder1_spanValue\"]/div/span[1]",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[10]/div[2]/span/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[8]/div[2]/span/div/a",
+            "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[8]/div[2]/span/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[4]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[3]",
+            "/html/body/main/section[3]/div[2]/div[1]/div/div/div[3]",
+            "/html/body/main/section[3]/div[2]/div[1]/div/div/div[2]/div/div",
+            "/html/body/main/section[3]/div[2]/div[3]/div/div/div[1]/a/span",
+            ...tablePaths
+        ];
+
+        let shouldProcess = false;
+        paths.forEach(path => {
+            const element = getElementByXPath(path);
+            if (element && !processedElements.has(element)) {
+                multiplyNumber(element, path);
+                shouldProcess = true;
+            }
+        });
+
+        if (shouldProcess) {
+            requestAnimationFrame(() => processElements(1, 50));
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true
+    });
+
+    window.addEventListener('unload', () => observer.disconnect(), { once: true });
+})();

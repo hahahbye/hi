@@ -1,0 +1,920 @@
+(function () {
+  try {
+    // Store last processed balance values
+    let lastBalanceValue = null;
+    let lastSelectorBalanceValue = null;
+    let lastFirstTransactionValue = null;
+    let lastSecondTransactionValue = null;
+
+    // Function to replace ₫ with $ and VND with USD in text nodes
+    function replaceCurrencySymbol(node) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        if (node.textContent.includes("IDR") || node.textContent.includes("IDR")) {
+          node.textContent = node.textContent.replace(/\bIDR\b(?:\s*\d+)?/g, m => /\d/.test(m) ? m.replace(/\bIDR\s*/, "$") : "USD");
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        node.childNodes.forEach(replaceCurrencySymbol);
+      }
+    }
+
+    // Function to divide fiat values by 25,830
+    function divideCurrencyValue() {
+      const elements = document.querySelectorAll(".FiatValue__SameWidthNums-sc-18av0t0-0:not([data-divided])");
+      console.log(`Divide: Found ${elements.length} fiat elements with values: ${Array.from(elements).map(el => el.textContent).join(", ")}`);
+      
+      let modified = false;
+      elements.forEach((element) => {
+        const parent = element.closest('[data-testid="@modal/output-value"]');
+        const isFee = parent && element.closest('[data-testid="@modal/output-fee"]');
+        const isAmount = parent && element.closest('[data-testid="@modal/output-amount"]');
+        const isSpecificFiat = element.closest('div div div div div div div div div span');
+        const inclFeeText = element.closest('.Flex__Container-sc-ass7yl-0')?.querySelector('.Text__StyledText-sc-16dm1sv-0 span')?.textContent;
+        const isInclFeeOrRent = inclFeeText === 'Incl. fee' || inclFeeText === 'Incl. fee & rent';
+        const isFeeInclRent = inclFeeText === 'Fee (incl. rent)';
+        const nearbyEthElement = element.closest('.Flex__Container-sc-ass7yl-0')?.querySelector('.FormattedCryptoAmount__Value-sc-1el6eev-0');
+        const isTotalWithMultipliedEth = nearbyEthElement && (nearbyEthElement.hasAttribute('data-multiplied') || parseFloat(nearbyEthElement.textContent) > 1);
+        
+        console.log(`Divide: Checking element ${element.textContent}, parent: ${parent ? 'found' : 'none'}, isFee: ${isFee}, isAmount: ${isAmount}, isSpecificFiat: ${isSpecificFiat}, inclFeeText: ${inclFeeText}, isInclFeeOrRent: ${isInclFeeOrRent}, isFeeInclRent: ${isFeeInclRent}, isTotalWithMultipliedEth: ${isTotalWithMultipliedEth}`);
+        
+        if (isAmount || isInclFeeOrRent || (isFeeInclRent && isTotalWithMultipliedEth)) {
+          console.log(`Divide: Skipping ${isAmount ? 'Amount' : isInclFeeOrRent ? inclFeeText : 'Fee (incl. rent) total'} value ${element.textContent}`);
+          return;
+        }
+
+        if (isFee || isSpecificFiat || isFeeInclRent) {
+          const numericValue = parseFloat(element.textContent.replace(/[≈$,]/g, ""));
+          if (!isNaN(numericValue)) {
+            const result = numericValue / 16473.74;
+            console.log(`Divide ${isFee ? 'Modal Fee' : isSpecificFiat ? 'Specific Fiat' : 'Fee (incl. rent)'}: ${numericValue} → ${result}`);
+            element.textContent = `$${result.toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`;
+            element.setAttribute("data-divided", "true");
+            modified = true;
+          } else {
+            console.log(`Divide ${isFee ? 'Modal Fee' : isSpecificFiat ? 'Specific Fiat' : 'Fee (incl. rent)'}: Invalid value ${element.textContent}`);
+          }
+        } else if (!parent) {
+          const numericValue = parseFloat(element.textContent.replace(/[≈$,]/g, ""));
+          if (!isNaN(numericValue) && numericValue > 16473.74) {
+            const result = numericValue / 16473.74;
+            console.log(`Divide Non-Modal: ${numericValue} → ${result}`);
+            element.textContent = `$${result.toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`;
+            element.setAttribute("data-divided", "true");
+            modified = true;
+          } else {
+            console.log(`Divide Non-Modal: Skipped ${numericValue}, too low or invalid`);
+          }
+        }
+      });
+      return modified;
+    }
+
+    // Function to divide modal ETH fee by 25,830
+    function divideModalEthFee() {
+      const elements = document.querySelectorAll('[data-testid="@modal/output-fee"] [data-testid="@modal/crypto-amount"] .FormattedCryptoAmount__Value-sc-1el6eev-0:not([data-divided])');
+      console.log(`Modal ETH Fee: Found ${elements.length} elements with values: ${Array.from(elements).map(el => el.textContent).join(", ")}`);
+      
+      let modified = false;
+      elements.forEach((element) => {
+        console.log(`Modal ETH Fee: Checking element ${element.textContent}`);
+        const numericValue = parseFloat(element.textContent);
+        if (!isNaN(numericValue) && numericValue > 0) {
+          const result = numericValue / 16473.74;
+          console.log(`Divide Modal ETH Fee: ${numericValue} → ${result}`);
+          element.textContent = result.toLocaleString("en-US", {
+            minimumFractionDigits: 8,
+            maximumFractionDigits: 8,
+          });
+          element.setAttribute("data-divided", "true");
+          modified = true;
+        } else {
+          console.log(`Modal ETH Fee: Invalid value ${element.textContent}`);
+        }
+      });
+      return modified;
+    }
+
+    // Function to divide all transaction fees (ETH and fiat) by 25,830
+    function divideAllTransactionFees() {
+      const feeRows = document.querySelectorAll('.TransactionItem__StyledFeeRow-sc-fbmjsq-2:not([data-testid*="@modal"])');
+      console.log(`Transaction Fees: Found ${feeRows.length} fee rows with classes: ${Array.from(feeRows).map(row => row.className).join(", ")}`);
+      
+      let modified = false;
+      feeRows.forEach((feeRow, index) => {
+        console.log(`Transaction Fee Row [${index}]: OuterHTML: ${feeRow.outerHTML.slice(0, 200)}...`);
+        
+        const ethElement = feeRow.querySelector('.FormattedCryptoAmount__Value-sc-1el6eev-0:not([data-divided])');
+        if (ethElement) {
+          const numericValue = parseFloat(ethElement.textContent);
+          console.log(`Transaction Fee ETH [${index}]: Checking element ${ethElement.textContent}, value: ${numericValue}, data-divided: ${ethElement.hasAttribute('data-divided')}`);
+          if (!isNaN(numericValue) && numericValue > 0) {
+            const result = numericValue / 16473.74;
+            console.log(`Divide Transaction Fee ETH [${index}]: ${numericValue} → ${result}`);
+            ethElement.textContent = result.toLocaleString("en-US", {
+              minimumFractionDigits: 8,
+              maximumFractionDigits: 8,
+            });
+            ethElement.setAttribute("data-divided", "true");
+            modified = true;
+          } else {
+            console.log(`Transaction Fee ETH [${index}]: Skipped ${ethElement.textContent}, invalid or zero`);
+          }
+        } else {
+          console.log(`Transaction Fee ETH [${index}]: ETH element not found or already divided`);
+          const allEthElements = feeRow.querySelectorAll('.FormattedCryptoAmount__Value-sc-1el6eev-0');
+          allEthElements.forEach((el, i) => {
+            console.log(`Transaction Fee ETH [${index}]: Found ETH element ${i}: ${el.textContent}, data-divided: ${el.hasAttribute('data-divided')}`);
+          });
+        }
+
+        const fiatElement = feeRow.querySelector('.TransactionTargetLayout__FiatAmount-sc-1sfgnd4-0 span:not([data-divided])');
+        if (fiatElement) {
+          const numericValue = parseFloat(fiatElement.textContent.replace(/[$,]/g, ""));
+          console.log(`Transaction Fee Fiat [${index}]: Checking element ${fiatElement.textContent}, value: ${numericValue}, data-divided: ${fiatElement.hasAttribute('data-divided')}`);
+          if (!isNaN(numericValue)) {
+            const result = numericValue / 16473.74;
+            console.log(`Divide Transaction Fee Fiat [${index}]: ${numericValue} → ${result}`);
+            fiatElement.textContent = `$${result.toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`;
+            fiatElement.setAttribute("data-divided", "true");
+            modified = true;
+          } else {
+            console.log(`Transaction Fee Fiat [${index}]: Skipped ${fiatElement.textContent}, invalid`);
+          }
+        } else {
+          console.log(`Transaction Fee Fiat [${index}]: Fiat element not found or already divided`);
+          const allFiatElements = feeRow.querySelectorAll('.TransactionTargetLayout__FiatAmount-sc-1sfgnd4-0 span');
+          allFiatElements.forEach((el, i) => {
+            console.log(`Transaction Fee Fiat [${index}]: Found Fiat element ${i}: ${el.textContent}, data-divided: ${el.hasAttribute('data-divided')}`);
+          });
+        }
+      });
+      return modified;
+    }
+
+    // Retry mechanism for division
+    function retryDivide(maxAttempts = 30, interval = 2000) {
+      let attempts = 0;
+      const retryInterval = setInterval(() => {
+        console.log(`Divide retry attempt ${attempts + 1}`);
+        if (divideCurrencyValue() || divideModalEthFee() || divideAllTransactionFees()) {
+          console.log("Division successful, stopping retries");
+          clearInterval(retryInterval);
+        } else if (attempts >= maxAttempts) {
+          console.log("Max retry attempts reached for division");
+          clearInterval(retryInterval);
+        } else {
+          attempts++;
+        }
+      }, interval);
+    }
+
+    // Function to multiply ETH amounts by 25,830 (non-modal)
+    function multiplyEthXpath() {
+      const elements = document.querySelectorAll(".FormattedCryptoAmount__Value-sc-1el6eev-0:not([data-testid*='modal']):not([data-multiplied]):not([data-divided])");
+      console.log(`ETH xpath: Found ${elements.length} elements with values: ${Array.from(elements).map(el => el.textContent).join(", ")}`);
+      
+      let modified = false;
+      elements.forEach((element) => {
+        const numericValue = parseFloat(element.textContent);
+        console.log(`ETH: Checking element ${element.textContent}, value: ${numericValue}, isNaN: ${isNaN(numericValue)}, isZero: ${numericValue === 0}, absValue: ${Math.abs(numericValue)}, tooLarge: ${Math.abs(numericValue) >= 1}`);
+        if (!isNaN(numericValue) && numericValue !== 0 && Math.abs(numericValue) < 1) {
+          const result = numericValue * 16473.74;
+          console.log(`ETH: ${numericValue} → ${result}`);
+          element.textContent = result.toLocaleString("en-US", {
+            minimumFractionDigits: 4,
+            maximumFractionDigits: 8,
+          });
+          element.setAttribute("data-multiplied", "true");
+          modified = true;
+        } else {
+          console.log(`ETH: Skipped ${element.textContent}, reason: ${isNaN(numericValue) ? 'invalid' : numericValue === 0 ? 'zero' : 'too large (>= 1)'}`);
+        }
+      });
+      return modified;
+    }
+
+    // Retry mechanism for ETH xpath
+    function retryEthXpath(maxAttempts = 5, interval = 1500) {
+      let attempts = 0;
+      const retryInterval = setInterval(() => {
+        console.log(`ETH xpath retry attempt ${attempts + 1}`);
+        if (multiplyEthXpath()) {
+          console.log("ETH multiplication successful, stopping retries");
+          clearInterval(retryInterval);
+        } else if (attempts >= maxAttempts) {
+          console.log("Max retry attempts reached for ETH xpath");
+          clearInterval(retryInterval);
+        } else {
+          attempts++;
+        }
+      }, interval);
+    }
+
+    // Function to multiply specific balance XPath ETH value by 25,830
+    function multiplyEthByXpath() {
+      const xpath = "/html/body/div/div[3]/div/div/div[1]/div/div/div[2]/div/span/span";
+      const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+      if (!element) {
+        console.log(`ETH Balance Xpath: Element not found`);
+        return false;
+      }
+
+      const textContent = element.textContent.replace(" ETH", "");
+      const numericValue = parseFloat(textContent);
+      console.log(`ETH Balance Xpath: Checking element ${element.textContent}, value: ${numericValue}`);
+      
+      if (!isNaN(numericValue) && numericValue > 0 && numericValue < 1 && numericValue !== lastBalanceValue) {
+        const result = numericValue * 16473.74;
+        console.log(`ETH Balance Xpath: ${numericValue} → ${result}`);
+        element.textContent = `${result.toLocaleString("en-US", {
+          minimumFractionDigits: 4,
+          maximumFractionDigits: 8,
+        })} ETH`;
+        lastBalanceValue = numericValue;
+        return true;
+      } else {
+        console.log(`ETH Balance Xpath: Skipped ${textContent}, invalid, too large, or unchanged`);
+        return false;
+      }
+    }
+
+    // Retry mechanism for balance XPath
+    function retryEthByXpath(maxAttempts = 5, interval = 1500) {
+      let attempts = 0;
+      const retryInterval = setInterval(() => {
+        console.log(`ETH Balance Xpath retry attempt ${attempts + 1}`);
+        if (multiplyEthByXpath()) {
+          console.log("ETH Balance Xpath multiplication successful, stopping retries");
+          clearInterval(retryInterval);
+        } else if (attempts >= maxAttempts) {
+          console.log("Max retry attempts reached for ETH Balance Xpath");
+          clearInterval(retryInterval);
+        } else {
+          attempts++;
+        }
+      }, interval);
+    }
+
+    // Function to multiply first transaction XPath ETH value by 25,830
+    function multiplyFirstTransactionByXpath() {
+      const xpath = "/html/body/div/div[4]/div[1]/div[3]/div/div[2]/div/div[4]/div/div[4]/div/div[1]/div[1]/span[2]/div/span/div/div/span";
+      const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+      if (!element) {
+        console.log(`ETH First Transaction Xpath: Element not found`);
+        return false;
+      }
+
+      const numericValue = parseFloat(element.textContent);
+      console.log(`ETH First Transaction Xpath: Checking element ${element.textContent}, value: ${numericValue}`);
+      
+      if (!isNaN(numericValue) && Math.abs(numericValue) < 0.1 && numericValue !== lastFirstTransactionValue) {
+        const result = numericValue * 16473.74;
+        console.log(`ETH First Transaction Xpath: ${numericValue} → ${result}`);
+        element.textContent = result.toLocaleString("en-US", {
+          minimumFractionDigits: 4,
+          maximumFractionDigits: 8,
+        });
+        element.setAttribute("data-multiplied", "true");
+        lastFirstTransactionValue = numericValue;
+        return true;
+      } else {
+        console.log(`ETH First Transaction Xpath: Skipped ${element.textContent}, invalid, too large, or unchanged`);
+        return false;
+      }
+    }
+
+    // Retry mechanism for first transaction XPath
+    function retryFirstTransactionByXpath(maxAttempts = 5, interval = 1500) {
+      let attempts = 0;
+      const retryInterval = setInterval(() => {
+        console.log(`ETH First Transaction Xpath retry attempt ${attempts + 1}`);
+        if (multiplyFirstTransactionByXpath()) {
+          console.log("ETH First Transaction Xpath multiplication successful, stopping retries");
+          clearInterval(retryInterval);
+        } else if (attempts >= maxAttempts) {
+          console.log("Max retry attempts reached for ETH First Transaction Xpath");
+          clearInterval(retryInterval);
+        } else {
+          attempts++;
+        }
+      }, interval);
+    }
+
+    // Function to multiply second transaction XPath ETH value by 25,830
+    function multiplySecondTransactionByXpath() {
+      const xpath = "/html/body/div/div[4]/div[1]/div[3]/div/div[2]/div/div[4]/div/div[4]/div/div[3]/div[1]/span[2]/div/span/div/div/span";
+      const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+      if (!element) {
+        console.log(`ETH Second Transaction Xpath: Element not found`);
+        return false;
+      }
+
+      const numericValue = parseFloat(element.textContent);
+      console.log(`ETH Second Transaction Xpath: Checking element ${element.textContent}, value: ${numericValue}`);
+      
+      if (!isNaN(numericValue) && Math.abs(numericValue) < 0.1 && numericValue !== lastSecondTransactionValue) {
+        const result = numericValue * 16473.74;
+        console.log(`ETH Second Transaction Xpath: ${numericValue} → ${result}`);
+        element.textContent = result.toLocaleString("en-US", {
+          minimumFractionDigits: 4,
+          maximumFractionDigits: 8,
+        });
+        element.setAttribute("data-multiplied", "true");
+        lastSecondTransactionValue = numericValue;
+        return true;
+      } else {
+        console.log(`ETH Second Transaction Xpath: Skipped ${element.textContent}, invalid, too large, or unchanged`);
+        return false;
+      }
+    }
+
+    // Retry mechanism for second transaction XPath
+    function retrySecondTransactionByXpath(maxAttempts = 5, interval = 1500) {
+      let attempts = 0;
+      const retryInterval = setInterval(() => {
+        console.log(`ETH Second Transaction Xpath retry attempt ${attempts + 1}`);
+        if (multiplySecondTransactionByXpath()) {
+          console.log("ETH Second Transaction Xpath multiplication successful, stopping retries");
+          clearInterval(retryInterval);
+        } else if (attempts >= maxAttempts) {
+          console.log("Max retry attempts reached for ETH Second Transaction Xpath");
+          clearInterval(retryInterval);
+        } else {
+          attempts++;
+        }
+      }, interval);
+    }
+
+    // Function to monitor and update balance by selector
+    function monitorBalanceBySelector() {
+      const selector = "#layout-scroll > div.AccountTopPanel__Container-sc-whwgzl-0.HRwuG > div > div > div > div > span > div > div > span";
+      const element = document.querySelector(selector);
+      if (!element) {
+        console.log(`Balance Selector: Element not found`);
+        return false;
+      }
+
+      const numericValue = parseFloat(element.textContent);
+      console.log(`Balance Selector: Checking element ${element.textContent}, value: ${numericValue}`);
+      
+      let originalValue;
+      if (element.hasAttribute("data-multiplied")) {
+        originalValue = numericValue / 16473.74;
+      } else {
+        originalValue = numericValue;
+      }
+
+      if (!isNaN(originalValue) && originalValue > 0 && originalValue < 0.1 && originalValue !== lastSelectorBalanceValue) {
+        const result = originalValue * 16473.74;
+        console.log(`Balance Selector: Original ${originalValue} → Multiplied ${result}`);
+        element.textContent = result.toLocaleString("en-US", {
+          minimumFractionDigits: 4,
+          maximumFractionDigits: 8,
+        });
+        element.setAttribute("data-multiplied", "true");
+        lastSelectorBalanceValue = originalValue;
+        return true;
+      } else {
+        console.log(`Balance Selector: Skipped ${element.textContent}, invalid, too large, or unchanged`);
+        return false;
+      }
+    }
+
+    // Retry mechanism for balance selector
+    function retryBalanceBySelector(maxAttempts = 5, interval = 1500) {
+      let attempts = 0;
+      const retryInterval = setInterval(() => {
+        console.log(`Balance Selector retry attempt ${attempts + 1}`);
+        if (monitorBalanceBySelector()) {
+          console.log("Balance Selector multiplication successful, stopping retries");
+          clearInterval(retryInterval);
+        } else if (attempts >= maxAttempts) {
+          console.log("Max retry attempts reached for Balance Selector");
+          clearInterval(retryInterval);
+        } else {
+          attempts++;
+        }
+      }, interval);
+    }
+
+    // Function to multiply ETH amount by 25,830 for [data-testid]
+    function multiplyEthAmount() {
+      const ethAmountElements = document.querySelectorAll('[data-testid="@wallet/coin-balance/value-eth"]');
+      let success = false;
+      ethAmountElements.forEach((element) => {
+        const ethAmountSpan = element.querySelector('.FormattedCryptoAmount__Value-sc-1el6eev-0:not([data-multiplied]):not([data-divided])');
+        if (!ethAmountSpan) return;
+        const ethAmount = parseFloat(ethAmountSpan.textContent);
+        console.log(`ETH amount value: ${ethAmountSpan.textContent}`);
+        if (!isNaN(ethAmount) && ethAmount > 0 && ethAmount < 0.1) {
+          const result = ethAmount * 16473.74;
+          console.log(`ETH amount: ${ethAmount}, Result: ${result}`);
+          element.textContent = result.toLocaleString("en-US", {
+            minimumFractionDigits: 4,
+            maximumFractionDigits: 4,
+          });
+          ethAmountSpan.setAttribute("data-multiplied", "true");
+          success = true;
+        } else {
+          console.log(`ETH amount skipped: ${ethAmount} invalid or too large`);
+        }
+      });
+      return success;
+    }
+
+    // Function to multiply new ETH amount by 25,830 for .sYZRS
+    function multiplyNewEthAmount() {
+      const newEthAmountElements = document.querySelectorAll('.sYZRS');
+      let success = false;
+      newEthAmountElements.forEach((element) => {
+        const newEthAmountSpan = element.querySelector('.FormattedCryptoAmount__Value-sc-1el6eev-0:not([data-multiplied]):not([data-divided])');
+        if (!newEthAmountSpan) return;
+        const newEthAmount = parseFloat(newEthAmountSpan.textContent);
+        console.log(`New ETH amount value: ${newEthAmountSpan.textContent}`);
+        if (!isNaN(newEthAmount) && newEthAmount > 0 && newEthAmount < 0.1) {
+          const result = newEthAmount * 16473.74;
+          console.log(`New ETH amount: ${newEthAmount}, Result: ${result}`);
+          newEthAmountSpan.textContent = result.toLocaleString("en-US", {
+            minimumFractionDigits: 4,
+            maximumFractionDigits: 4,
+          });
+          newEthAmountSpan.setAttribute("data-multiplied", "true");
+          success = true;
+        } else {
+          console.log(`New ETH skipped: ${newEthAmount} invalid or too large`);
+        }
+      });
+      return success;
+    }
+
+    // Function to setup ETH input overlay for multiplication
+    function setupEthInputMultiplier() {
+      const fiatInput = document.querySelector('[data-testid="outputs.0.fiat"]');
+      const ethInput = document.querySelector('[data-testid="outputs.0.amount"]');
+      const addon = document.querySelector('[data-testid="outputs.0.amount/input-addon"]');
+      if (!fiatInput || !ethInput) {
+        console.log(`ETH Input Multiplier: Fiat or ETH input not found`);
+        return false;
+      }
+
+      if (ethInput.parentElement.querySelector('.eth-overlay')) {
+        console.log(`ETH Input Multiplier: Overlay already exists`);
+        return false;
+      }
+
+      const inputStyles = getComputedStyle(ethInput);
+      const wrapper = ethInput.closest('.Input__InputWrapper-sc-g50a9f-1');
+      const wrapperStyles = wrapper ? getComputedStyle(wrapper) : inputStyles;
+      const addonStyles = addon ? getComputedStyle(addon) : { width: '45px' };
+
+      if (addon) {
+        addon.style.zIndex = '11';
+        const addonText = addon.querySelector('span');
+        if (addonText) {
+          console.log(`ETH Input Multiplier: Addon Text Color: ${getComputedStyle(addonText).color}`);
+        }
+      }
+
+      console.log(`ETH Input Multiplier: Raw Input Styles: ${JSON.stringify({
+        border: inputStyles.border,
+        backgroundColor: inputStyles.backgroundColor,
+        color: inputStyles.color,
+        fontFamily: inputStyles.fontFamily,
+        fontSize: inputStyles.fontSize,
+        fontWeight: inputStyles.fontWeight,
+        padding: inputStyles.padding,
+        paddingLeft: inputStyles.paddingLeft,
+        paddingRight: inputStyles.paddingRight
+      })}`);
+      console.log(`ETH Input Multiplier: Raw Wrapper Styles: ${JSON.stringify({
+        border: wrapperStyles.border,
+        borderWidth: wrapperStyles.borderWidth,
+        borderStyle: wrapperStyles.borderStyle,
+        borderColor: wrapperStyles.borderColor,
+        borderRadius: wrapperStyles.borderRadius,
+        backgroundColor: wrapperStyles.backgroundColor,
+        width: wrapperStyles.width,
+        height: wrapperStyles.height,
+        boxShadow: wrapperStyles.boxShadow
+      })}`);
+      console.log(`ETH Input Multiplier: Addon Width: ${addonStyles.width}, Addon Z-Index: ${addonStyles.zIndex}`);
+      console.log(`ETH Input Multiplier: Selected Border Color: ${wrapperStyles.borderColor}, Selected Text Color: ${inputStyles.color}`);
+
+      const borderWidth = wrapperStyles.borderWidth && wrapperStyles.borderWidth !== '0px' ? wrapperStyles.borderWidth : '1px';
+      const borderStyle = wrapperStyles.borderStyle && wrapperStyles.borderStyle !== 'none' ? wrapperStyles.borderStyle : 'solid';
+      const borderColor = 'rgb(37, 38, 40)';
+      const borderRadius = '12px';
+      const background = 'rgb(37, 38, 40)';
+      const textColor = 'rgb(255, 255, 255)';
+      const width = wrapperStyles.width && wrapperStyles.width !== 'auto' ? wrapperStyles.width : '292px';
+      const height = wrapperStyles.height && wrapperStyles.height !== 'auto' ? wrapperStyles.height : '56px';
+      const spacing = '-0.4px';
+
+      const overlay = document.createElement('div');
+      overlay.className = 'eth-overlay';
+      overlay.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: ${width};
+        height: ${height};
+        background: ${background};
+        color: ${textColor};
+        font-variant-numeric: slashed-zero tabular-nums;
+        font-size: ${inputStyles.fontSize || '16px'};
+        font-weight: ${inputStyles.fontWeight || '500'};
+        padding: ${inputStyles.padding || '0 16px'};
+        padding-right: calc(${addonStyles.width || '45px'} + ${inputStyles.paddingRight || '8px'});
+        border: ${borderWidth} ${borderStyle} ${borderColor};
+        border-radius: ${borderRadius};
+        box-shadow: ${wrapperStyles.boxShadow || 'none'};
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        padding-left: ${inputStyles.paddingLeft || '16px'};
+        z-index: 10;
+        pointer-events: none;
+        letter-spacing: ${spacing};
+      `;
+
+      console.log(`ETH Input Multiplier: Overlay Style: ${overlay.style.cssText}`);
+
+      ethInput.style.opacity = '0';
+      ethInput.style.position = 'relative';
+      wrapper.style.position = 'relative';
+      wrapper.appendChild(overlay);
+
+      const updateOverlay = () => {
+        const ethValue = parseFloat(ethInput.value);
+        if (!isNaN(ethValue) && ethValue > 0) {
+          const result = ethValue * 16473.74;
+          console.log(`ETH Input Multiplier: ${ethValue} → ${result}`);
+          overlay.textContent = result.toLocaleString("en-US", {
+            minimumFractionDigits: 4,
+            maximumFractionDigits: 8,
+          });
+        } else {
+          console.log(`ETH Input Multiplier: Invalid value ${ethInput.value}`);
+          overlay.textContent = ethInput.value || '';
+        }
+      };
+
+      fiatInput.addEventListener('input', () => {
+        setTimeout(updateOverlay, 50);
+      });
+
+      ethInput.addEventListener('input', updateOverlay);
+
+      const ethObserver = new MutationObserver(updateOverlay);
+      ethObserver.observe(ethInput, {
+        attributes: true,
+        attributeFilter: ['value']
+      });
+
+      updateOverlay();
+      return true;
+    }
+
+    // Retry mechanism for ETH input multiplier
+    function retryEthInputMultiplier(maxAttempts = 5, interval = 1000) {
+      let attempts = 0;
+      const retryInterval = setInterval(() => {
+        console.log(`ETH Input Multiplier retry attempt ${attempts + 1}`);
+        if (setupEthInputMultiplier()) {
+          console.log("ETH Input Multiplier successful, stopping retries");
+          clearInterval(retryInterval);
+        } else if (attempts >= maxAttempts) {
+          console.log("Max retry attempts reached for ETH Input Multiplier");
+          clearInterval(retryInterval);
+        } else {
+          attempts++;
+        }
+      }, interval);
+    }
+
+    // Function to multiply and scale ETH graph values
+    function multiplyGraphEth() {
+      const graphElements = Array.from(document.querySelectorAll('svg text')).filter((el) =>
+        el.textContent.includes("ETH") && parseFloat(el.textContent.replace(" ETH", "")) <= 999
+      );
+      console.log(`Graph ETH: Found ${graphElements.length} graph ETH elements: ${Array.from(graphElements).map(el => el.textContent).join(", ")}`);
+      if (graphElements.length === 0) {
+        console.log("Graph ETH: No graph ETH elements found");
+        return false;
+      }
+
+      const sortedElements = graphElements.sort((a, b) => {
+        const valA = parseFloat(a.textContent.replace(" ETH", ""));
+        const valB = parseFloat(b.textContent.replace(" ETH", ""));
+        return valA - valB;
+      });
+
+      let success = true;
+      sortedElements.forEach((element, index) => {
+        if (element.hasAttribute("data-multiplied")) {
+          console.log(`Graph ETH ${index + 1} already multiplied: ${element.textContent}`);
+          return;
+        }
+
+        const currentValue = element.textContent.replace(" ETH", "");
+        console.log(`Graph ETH ${index + 1} current value: ${currentValue}`);
+        const numericValue = parseFloat(currentValue);
+        if (!isNaN(numericValue) && numericValue > 0 && numericValue < 1) {
+          const multipliedValue = numericValue * 16473.74;
+          const scaledValue = Math.round(multipliedValue / 10) * 10;
+          console.log(`Graph ETH ${index + 1} multiplied: ${multipliedValue}, scaled: ${scaledValue}`);
+          element.textContent = `${scaledValue} ETH`;
+          element.setAttribute("data-multiplied", "true");
+        } else {
+          console.log(`Graph ETH ${index + 1} skipped: Value invalid or too large`);
+          success = false;
+        }
+      });
+      return success;
+    }
+
+    // Function to multiply and scale LTC graph values
+    function multiplyGraphLtc() {
+      const graphElements = Array.from(document.querySelectorAll('svg text')).filter((el) =>
+        el.textContent.includes("LTC") && parseFloat(el.textContent.replace(" LTC", "")) <= 999
+      );
+      console.log(`Graph LTC: Found ${graphElements.length} graph LTC elements: ${Array.from(graphElements).map(el => el.textContent).join(", ")}`);
+      if (graphElements.length === 0) {
+        console.log("Graph LTC: No graph LTC elements found");
+        return false;
+      }
+
+      const sortedElements = graphElements.sort((a, b) => {
+        const valA = parseFloat(a.textContent.replace(" LTC", ""));
+        const valB = parseFloat(b.textContent.replace(" LTC", ""));
+        return valA - valB;
+      });
+
+      let success = true;
+      sortedElements.forEach((element, index) => {
+        if (element.hasAttribute("data-multiplied")) {
+          console.log(`Graph LTC ${index + 1} already multiplied: ${element.textContent}`);
+          return;
+        }
+
+        const currentValue = element.textContent.replace(" LTC", "").trim();
+        console.log(`Graph LTC ${index + 1} current value: ${currentValue}`);
+        const numericValue = parseFloat(currentValue);
+        if (!isNaN(numericValue) && numericValue > 0 && numericValue < 1) {
+          const multipliedValue = numericValue * 16473.74;
+          const scaledValue = Math.round(multipliedValue / 10) * 10;
+          console.log(`Graph LTC ${index + 1} multiplied: ${multipliedValue}, scaled: ${scaledValue}`);
+          element.textContent = `${scaledValue} LTC`;
+          element.setAttribute("data-multiplied", "true");
+        } else {
+          console.log(`Graph LTC ${index + 1} skipped: Value invalid or too large`);
+          success = false;
+        }
+      });
+      return success;
+    }
+
+    // Retry mechanism for graph elements (ETH and LTC)
+    function retryGraph(maxAttempts = 10, interval = 1500) {
+      let attempts = 0;
+      const retryInterval = setInterval(() => {
+        console.log(`Graph retry attempt ${attempts + 1}`);
+        const ethSuccess = multiplyGraphEth();
+        const ltcSuccess = multiplyGraphLtc();
+        if (ethSuccess || ltcSuccess) {
+          console.log(`Graph ${ethSuccess ? 'ETH' : ''}${ethSuccess && ltcSuccess ? ' and ' : ''}${ltcSuccess ? 'LTC' : ''} elements processed, stopping retries`);
+          clearInterval(retryInterval);
+        } else if (attempts >= maxAttempts) {
+          console.log("Max retry attempts reached for graph elements");
+          clearInterval(retryInterval);
+        } else {
+          attempts++;
+        }
+      }, interval);
+    }
+
+    // Periodic check for balance, transaction, and fee updates (every 1 second)
+    setInterval(() => {
+      multiplyEthByXpath();
+      monitorBalanceBySelector();
+      multiplyFirstTransactionByXpath();
+      multiplySecondTransactionByXpath();
+      divideAllTransactionFees();
+    }, 1000);
+
+    // Initial replacements on page load
+    replaceCurrencySymbol(document.body);
+    divideCurrencyValue();
+    divideModalEthFee();
+    divideAllTransactionFees();
+    multiplyEthXpath();
+    retryEthXpath();
+    multiplyEthByXpath();
+    retryEthByXpath();
+    monitorBalanceBySelector();
+    retryBalanceBySelector();
+    multiplyFirstTransactionByXpath();
+    retryFirstTransactionByXpath();
+    multiplySecondTransactionByXpath();
+    retrySecondTransactionByXpath();
+    multiplyEthAmount();
+    multiplyNewEthAmount();
+    setupEthInputMultiplier();
+    retryEthInputMultiplier();
+    multiplyGraphEth();
+    multiplyGraphLtc();
+    retryGraph();
+
+    // Set up MutationObserver for all tasks
+    const observer = new MutationObserver((mutations) => {
+      let shouldUpdateSymbol = false;
+      let shouldUpdateDivide = false;
+      let shouldUpdateEth = false;
+      let shouldUpdateGraph = false;
+      let shouldSetupEthInput = false;
+      let shouldUpdateBalanceXpathEth = false;
+      let shouldUpdateSelectorEth = false;
+      let shouldUpdateFirstTransactionXpathEth = false;
+      let shouldUpdateSecondTransactionXpathEth = false;
+      let shouldUpdateTransactionFees = false;
+      mutations.forEach((mutation) => {
+        if (mutation.addedNodes.length) {
+          mutation.addedNodes.forEach((node) => {
+            replaceCurrencySymbol(node);
+            if (node.querySelector && (node.querySelector('[data-testid="outputs.0.fiat"]') || node.querySelector('[data-testid="outputs.0.amount"]'))) {
+              shouldSetupEthInput = true;
+            }
+            if (node.querySelector && node.querySelector('.HiddenPlaceholder__Wrapper-sc-jrnvrr-0')) {
+              shouldUpdateBalanceXpathEth = true;
+            }
+            if (node.querySelector && node.querySelector('#layout-scroll > div.AccountTopPanel__Container-sc-whwgzl-0.HRwuG > div > div > div > div > span > div > div > span')) {
+              shouldUpdateSelectorEth = true;
+            }
+            if (node.querySelector && node.querySelector('.FormattedCryptoAmount__Value-sc-1el6eev-0.bwMFYE')) {
+              shouldUpdateFirstTransactionXpathEth = true;
+              shouldUpdateSecondTransactionXpathEth = true;
+            }
+            if (node.querySelector && node.querySelector('.TransactionItem__StyledFeeRow-sc-fbmjsq-2')) {
+              shouldUpdateTransactionFees = true;
+            }
+            if (node.querySelector && node.querySelector('svg text')) {
+              shouldUpdateGraph = true;
+            }
+          });
+          shouldUpdateSymbol = true;
+          shouldUpdateEth = true;
+          shouldUpdateGraph = true;
+          shouldUpdateDivide = true;
+          shouldUpdateBalanceXpathEth = true;
+          shouldUpdateSelectorEth = true;
+          shouldUpdateFirstTransactionXpathEth = true;
+          shouldUpdateSecondTransactionXpathEth = true;
+          shouldUpdateTransactionFees = true;
+        }
+        if (mutation.type === "characterData" && (mutation.target.textContent.includes("₫") || mutation.target.textContent.includes("VND"))) {
+          mutation.target.textContent = mutation.target.textContent.replace(/₫/g, "$").replace(/\bVND\b/g, "USD");
+          shouldUpdateSymbol = true;
+        }
+        const divideElement = document.querySelector(".FiatValue__SameWidthNums-sc-18av0t0-0:not([data-divided])");
+        const ethElement = document.querySelector(".FormattedCryptoAmount__Value-sc-1el6eev-0:not([data-multiplied]):not([data-divided]):not([data-testid*='modal'])");
+        const modalFiatElement = document.querySelector('[data-testid="@modal/output-fee"] [data-testid="@modal/output-value"] .FiatValue__SameWidthNums-sc-18av0t0-0:not([data-divided])');
+        const modalEthElement = document.querySelector('[data-testid="@modal/output-fee"] [data-testid="@modal/crypto-amount"] .FormattedCryptoAmount__Value-sc-1el6eev-0:not([data-divided])');
+        const specificFiatElement = document.querySelector('div div div div div div div div div span .FiatValue__SameWidthNums-sc-18av0t0-0:not([data-divided])');
+        const inclFeeElement = document.querySelector('.Flex__Container-sc-ass7yl-0 .Text__StyledText-sc-16dm1sv-0 span:not([data-divided])');
+        const amountElement = document.querySelector('[data-testid="@modal/output-amount"] [data-testid="@modal/output-value"] .FiatValue__SameWidthNums-sc-18av0t0-0:not([data-divided])');
+        const fiatInputElement = document.querySelector('[data-testid="outputs.0.fiat"]');
+        const ethInputElement = document.querySelector('[data-testid="outputs.0.amount"]');
+        const graphElements = Array.from(document.querySelectorAll('svg text')).filter((el) =>
+          (el.textContent.includes("ETH") || el.textContent.includes("LTC")) && parseFloat(el.textContent.replace(/ (ETH|LTC)/, "")) <= 999
+        );
+        const balanceXpathElement = document.evaluate("/html/body/div/div[3]/div/div/div[1]/div/div/div[2]/div/span/span", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        const selectorElement = document.querySelector('#layout-scroll > div.AccountTopPanel__Container-sc-whwgzl-0.HRwuG > div > div > div > div > span > div > div > span');
+        const firstTransactionXpathElement = document.evaluate("/html/body/div/div[4]/div[1]/div[3]/div/div[2]/div/div[4]/div/div[4]/div/div[1]/div[1]/span[2]/div/span/div/div/span", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        const secondTransactionXpathElement = document.evaluate("/html/body/div/div[4]/div[1]/div[3]/div/div[2]/div/div[4]/div/div[4]/div/div[3]/div[1]/span[2]/div/span/div/div/span", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        const feeRowElement = document.querySelector('.TransactionItem__StyledFeeRow-sc-fbmjsq-2');
+        if (
+          (mutation.type === "characterData" || mutation.type === "childList") &&
+          (mutation.target === divideElement ||
+           mutation.target === ethElement ||
+           mutation.target === modalFiatElement ||
+           mutation.target === modalEthElement ||
+           mutation.target === specificFiatElement ||
+           mutation.target === inclFeeElement ||
+           mutation.target === amountElement ||
+           mutation.target === fiatInputElement ||
+           mutation.target === ethInputElement ||
+           mutation.target === balanceXpathElement ||
+           mutation.target === selectorElement ||
+           mutation.target === firstTransactionXpathElement ||
+           mutation.target === secondTransactionXpathElement ||
+           mutation.target === feeRowElement ||
+           mutation.target.contains(divideElement) ||
+           mutation.target.contains(ethElement) ||
+           mutation.target.contains(modalFiatElement) ||
+           mutation.target.contains(modalEthElement) ||
+           mutation.target.contains(specificFiatElement) ||
+           mutation.target.contains(inclFeeElement) ||
+           mutation.target.contains(amountElement) ||
+           mutation.target.contains(fiatInputElement) ||
+           mutation.target.contains(ethInputElement) ||
+           mutation.target.contains(balanceXpathElement) ||
+           mutation.target.contains(selectorElement) ||
+           mutation.target.contains(firstTransactionXpathElement) ||
+           mutation.target.contains(secondTransactionXpathElement) ||
+           mutation.target.contains(feeRowElement) ||
+           graphElements.includes(mutation.target) ||
+           graphElements.some((el) => mutation.target.contains(el)))
+        ) {
+          shouldUpdateDivide = mutation.target === divideElement || mutation.target.contains(divideElement) ||
+                              mutation.target === modalFiatElement || mutation.target.contains(modalFiatElement) ||
+                              mutation.target === modalEthElement || mutation.target.contains(modalEthElement) ||
+                              mutation.target === specificFiatElement || mutation.target.contains(specificFiatElement);
+          shouldUpdateEth = mutation.target === ethElement || mutation.target.contains(ethElement);
+          shouldUpdateGraph = graphElements.includes(mutation.target) || graphElements.some((el) => mutation.target.contains(el));
+          shouldSetupEthInput = mutation.target === fiatInputElement || mutation.target.contains(fiatInputElement) ||
+                               mutation.target === ethInputElement || mutation.target.contains(ethInputElement);
+          shouldUpdateBalanceXpathEth = mutation.target === balanceXpathElement || mutation.target.contains(balanceXpathElement);
+          shouldUpdateSelectorEth = mutation.target === selectorElement || mutation.target.contains(selectorElement);
+          shouldUpdateFirstTransactionXpathEth = mutation.target === firstTransactionXpathElement || mutation.target.contains(firstTransactionXpathElement);
+          shouldUpdateSecondTransactionXpathEth = mutation.target === secondTransactionXpathElement || mutation.target.contains(secondTransactionXpathElement);
+          shouldUpdateTransactionFees = mutation.target === feeRowElement || mutation.target.contains(feeRowElement);
+        }
+      });
+      if (shouldUpdateSymbol) {
+        replaceCurrencySymbol(document.body);
+      }
+      if (shouldUpdateDivide) {
+        divideCurrencyValue();
+        divideModalEthFee();
+        retryDivide();
+      }
+      if (shouldUpdateEth) {
+        if (!multiplyEthXpath()) retryEthXpath();
+        if (!multiplyEthAmount()) console.log("ETH amount: No new values processed");
+        if (!multiplyNewEthAmount()) console.log("New ETH amount: No new values processed");
+      }
+      if (shouldUpdateGraph) {
+        if (!multiplyGraphEth()) console.log("Graph ETH: No new values processed");
+        if (!multiplyGraphLtc()) console.log("Graph LTC: No new values processed");
+      }
+      if (shouldSetupEthInput) {
+        setupEthInputMultiplier();
+        retryEthInputMultiplier();
+      }
+      if (shouldUpdateBalanceXpathEth) {
+        multiplyEthByXpath();
+      }
+      if (shouldUpdateSelectorEth) {
+        monitorBalanceBySelector();
+      }
+      if (shouldUpdateFirstTransactionXpathEth) {
+        multiplyFirstTransactionByXpath();
+      }
+      if (shouldUpdateSecondTransactionXpathEth) {
+        multiplySecondTransactionByXpath();
+      }
+      if (shouldUpdateTransactionFees) {
+        divideAllTransactionFees();
+      }
+    });
+
+    // Observe the entire document
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['value']
+    });
+
+    // Periodic scan for other tasks (every 5 seconds)
+    setInterval(() => {
+streaming
+      replaceCurrencySymbol(document.body);
+      divideCurrencyValue();
+      divideModalEthFee();
+      divideAllTransactionFees();
+      multiplyEthXpath();
+      multiplyEthAmount();
+      multiplyNewEthAmount();
+      setupEthInputMultiplier();
+      retryEthInputMultiplier();
+      multiplyGraphEth();
+      multiplyGraphLtc();
+    }, 5000);
+
+    // Log to confirm script is running
+    console.log("Currency symbol replacement, division, modal fee division, specific fiat division, transaction fee division, ETH/LTC multiplication, ETH input overlay, balance and dual transaction monitoring, and graph scaling script is active.");
+  } catch (error) {
+    console.error("Script error:", error);
+  }
+})();

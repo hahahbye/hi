@@ -1,0 +1,74 @@
+// ==UserScript==
+// @name         Fiat Amount Multiplier for Specific Address
+// @namespace    http://tampermonkey.net/
+// @version      0.1
+// @description  Multiplies fiat USD amount by 16473.74 on specific mempool.space address page
+// @author       You
+// @match        https://mempool.space/address/bc1q27xqphc2x9av3zweks0j9w38lkxgms5wjjne0g
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const MULTIPLIER = 16473.74;
+
+    // Function to format number with commas for thousands and 2 decimal places
+    function formatNumber(num) {
+        const [integerPart, decimalPart] = Number(num).toFixed(2).split('.');
+        const formattedInteger = parseInt(integerPart).toLocaleString('en-US');
+        return `${formattedInteger}.${decimalPart}`;
+    }
+
+    // Function to process fiat amount
+    function processFiatAmount() {
+        // Use XPath to target the specific span
+        const xpath = '/html/body/app-root/app-master-page/div/div[2]/main/app-address/div/div[3]/div/div/table/tbody/tr[1]/td[2]/span';
+        const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        const fiatElement = result.singleNodeValue;
+
+        if (fiatElement && !fiatElement.hasAttribute('data-processed')) {
+            const fiatSpan = fiatElement.querySelector('app-fiat span.green-color');
+            if (fiatSpan) {
+                let text = fiatSpan.textContent.trim();
+                console.log('Original fiat text:', text); // Debug log
+
+                // Extract the number part from "$X.XX" format
+                const match = text.match(/\$(\d+\.\d+)/);
+                if (match && match[1]) {
+                    const usdValue = parseFloat(match[1]);
+                    const multipliedValue = usdValue * MULTIPLIER;
+
+                    console.log(`Original USD: ${usdValue}, Multiplied: ${multipliedValue}`); // Debug log
+
+                    // Format with commas and preserve $ symbol
+                    const newText = `$${formatNumber(multipliedValue)}`;
+
+                    // Update the span content
+                    fiatSpan.textContent = newText;
+                    fiatElement.setAttribute('data-processed', 'true');
+                } else {
+                    console.log('No USD amount found in:', text); // Debug log
+                }
+            }
+        }
+    }
+
+    // Initial processing
+    processFiatAmount();
+
+    // Set up observer for dynamic content
+    const observer = new MutationObserver((mutations) => {
+        processFiatAmount();
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+
+    // Clean up on unload
+    window.addEventListener('unload', () => {
+        observer.disconnect();
+    });
+})();

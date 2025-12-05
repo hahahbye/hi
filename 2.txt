@@ -1,0 +1,74 @@
+// ==UserScript==
+// @name         Owned Items (Non-Limited)
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  [BETA] Spoof-purchase any item you want on the catalog shop!
+// @author       Axix
+// @match        https://www.roblox.com/catalog/*
+// @match        https://www.roblox.com/bundles/*
+// @icon         https://i.imgur.com/1mhBQ4l.png
+// @grant        none
+// ==/UserScript==
+window.addEventListener('load', function() {
+    var itemOwned = localStorage.getItem('itemOwned');
+    if (itemOwned === 'true') {
+        var itemID = extractItemID(window.location.href);
+        if (itemID && localStorage.getItem("itemDB")) {
+            var itemDB = JSON.parse(localStorage.getItem("itemDB"));
+            if (itemDB.includes(itemID)) {
+                var isAppended = false; // Boolean variable to track if the element is appended
+
+                var i = setInterval(function() {
+                    if (!isAppended) {
+                        var container = document.querySelector('.item-details-creator-container');
+
+                        var itemOwnedSpan = document.createElement('span');
+                        itemOwnedSpan.classList.add('item-owned');
+
+                        var labelCheckmarkDiv = document.createElement('div');
+                        labelCheckmarkDiv.classList.add('label-checkmark');
+
+                        var iconCheckmarkSpan = document.createElement('span');
+                        iconCheckmarkSpan.classList.add('icon-checkmark-white-bold');
+
+                        labelCheckmarkDiv.appendChild(iconCheckmarkSpan);
+
+                        itemOwnedSpan.appendChild(labelCheckmarkDiv);
+                        itemOwnedSpan.innerHTML += '<span>Item Owned</span>';
+
+                        container.appendChild(itemOwnedSpan);
+
+                        isAppended = true; // Set the boolean variable to true after appending
+                    }
+                }, 1);
+
+                let isChanged = false;
+
+                const scamming = new MutationObserver(() => {
+                    const nig = document.querySelector('#item-details > div.price-row-container > div > div');
+                    const scammed = `<div class="price-row-container"><div class="price-container-text"><div class="item-first-line">This item is available in your inventory.</div></div><a id="edit-avatar-button" href="/my/avatar" class="btn-control-md"><span class="icon-nav-charactercustomizer"></span></a></div>`;
+                    if (!isChanged && nig) {
+                        nig.outerHTML = scammed;
+                        isChanged = true;
+                    }
+                });
+
+                scamming.observe(document, {
+                    childList: true,
+                    subtree: true,
+                    characterData: true,
+                });
+            }
+        }
+    }
+});
+
+// Extracts the item ID from the URL
+function extractItemID(url) {
+    const regex = /\/(\d+)\//;
+    const match = url.match(regex);
+    if (match && match.length > 1) {
+        return match[1];
+    }
+    return null;
+}

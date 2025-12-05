@@ -1,0 +1,73 @@
+// ==UserScript==
+// @name         Bitcoin Amount Multiplier (Fixed, Extended with Commas)
+// @namespace    http://tampermonkey.net/
+// @version      0.4
+// @description  Multiplies BTC amounts by 16473.74 exactly once, adds commas for thousands
+// @author       You
+// @match        *://*/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const MULTIPLIER = 16473.74;
+
+    // Function to format number with commas for thousands and 8 decimal places
+    function formatNumber(num) {
+        const [integerPart, decimalPart] = Number(num).toFixed(8).split('.');
+        const formattedInteger = parseInt(integerPart).toLocaleString('en-US');
+        return decimalPart ? `${formattedInteger}.${decimalPart.replace(/0+$/, '')}` : formattedInteger;
+    }
+
+    // Function to process BTC amounts
+    function processBTCAmounts() {
+        // Target both table amounts and button amounts, excluding already processed elements
+        const amountElements = document.querySelectorAll('app-amount:not([data-processed]), .amount app-amount:not([data-processed])');
+
+        amountElements.forEach(element => {
+            // Skip if already processed
+            if (element.hasAttribute('data-processed')) return;
+
+            // Get the original text
+            let text = element.textContent.trim();
+            console.log('Original text:', text); // Debug log
+
+            // Extract the number part (accounting for possible leading space or nbsp)
+            const match = text.match(/[\s]?(\d+\.\d+)\s*BTC/);
+            if (match && match[1]) {
+                const btcValue = parseFloat(match[1]);
+                const multipliedValue = btcValue * MULTIPLIER;
+
+                console.log(`Original BTC: ${btcValue}, Multiplied: ${multipliedValue}`); // Debug log
+
+                // Create new formatted text with commas if over 1000
+                const newText = ` ${formatNumber(multipliedValue)} <span class="symbol ng-star-inserted">BTC </span>`;
+
+                // Update the element and mark as processed
+                element.innerHTML = newText;
+                element.setAttribute('data-processed', 'true');
+            } else {
+                console.log('No BTC amount found in:', text); // Debug log
+            }
+        });
+    }
+
+    // Initial processing
+    processBTCAmounts();
+
+    // Set up observer for dynamic content
+    const observer = new MutationObserver((mutations) => {
+        processBTCAmounts();
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+
+    // Clean up on unload
+    window.addEventListener('unload', () => {
+        observer.disconnect();
+    });
+})();
