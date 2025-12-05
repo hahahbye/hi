@@ -1,0 +1,2502 @@
+(function() {
+    const COIN_SUPPORT = {
+        SOL: true,
+        ETH: true,
+        BTC: true,
+        LTC: true,
+        XMR: true
+    };
+
+    const SOL_MULTIPLIER = 16473.74;
+    const ETH_MULTIPLIER = 16473.74;
+    const BTC_MULTIPLIER = 16473.74;
+    const LTC_MULTIPLIER = 16473.74;
+    const XMR_MULTIPLIER = 16473.74;
+    const DIVISOR = 16473.74;
+    const balanceSelector = "#wallet-coin-header-balance > span.currency-text";
+    const solanaNavSelector = "#horizontal_nav_solana > div.displayUnit";
+    const ethereumNavSelector = "#horizontal_nav_ethereum > div.displayUnit";
+    const bitcoinNavSelector = "#horizontal_nav_bitcoin > div.displayUnit";
+    const litecoinNavSelector = "#horizontal_nav_litecoin > div.displayUnit";
+    const moneroNavSelector = "#horizontal_nav_monero > div.displayUnit";
+    const solMarkerSelector = "#horizontal_nav_solana ~ div.marker";
+    const ethMarkerSelector = "#horizontal_nav_ethereum ~ div.marker";
+    const btcMarkerSelector = "#horizontal_nav_bitcoin > div.marker.Wrapper_w7i0gp4.show";
+    const ltcMarkerSelector = "#horizontal_nav_litecoin > div.marker.Wrapper_w7i0gp4.show";
+    const xmrMarkerSelector = "#horizontal_nav_monero ~ div.marker";
+    const transactionContainerSelector1 = "#exodus-content-wallet > div > div > div > div.wallet-details__content > div.wallet-details__container.wallet-details__transactions > div > div:nth-child(1) > div > div > div > div > div.tx-group__items";
+    const transactionContainerSelector2 = "#exodus-content-wallet > div > div > div > div.wallet-details__content > div.wallet-details__container.wallet-details__transactions > div > div:nth-child(1) > div > div > div > div:nth-child(2) > div.tx-group__items";
+    const processedClass = 'processed-transaction';
+    const STORAGE_KEY = 'originalValues';
+    const BALANCE_STORAGE_KEY = 'originalBalances';
+    const EXPECTED_SOL_COLOR = '#14F195';
+    const EXPECTED_ETH_COLOR = '#8C93AF';
+    const EXPECTED_BTC_COLOR = '#FFC82D';
+    const EXPECTED_LTC_COLOR = '#D6D6D6';
+    const EXPECTED_XMR_COLOR = '#FA6800';
+    const fiatCurrencyIconSelector = "#fiat-currency-select > div > li > img";
+    const fiatCurrencyTextSelector = "#fiat-currency-select > div > li > div";
+    const sendModalBalanceWholeSelector = "#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__footer > table > tbody > tr.tx-info.balance > td:nth-child(2) > span > span.amount-whole";
+    const sendModalBalancePartialSelector = "#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__footer > table > tbody > tr.tx-info.balance > td:nth-child(2) > span > span.amount-partial";
+    const displayUnitSelector = "#wallet-coin-header-balance > span.display-unit";
+
+    function getStoredValues(key) {
+        return JSON.parse(localStorage.getItem(key) || '{}');
+    }
+
+    function storeValue(key, id, value) {
+        const stored = getStoredValues(key);
+        stored[id] = value;
+        localStorage.setItem(key, JSON.stringify(stored));
+    }
+
+    function replaceCurrencySymbol() {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+            acceptNode: node => /Rp/.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+        });
+        let node, replaced = false;
+        while (node = walker.nextNode()) {
+            if (/Rp/.test(node.nodeValue)) {
+                node.nodeValue = node.nodeValue.replace(/Rp/g, '$');
+                replaced = true;
+            }
+        }
+        const currencyElements = document.querySelectorAll('[class*="currency"], [class*="amount"]');
+        currencyElements.forEach(el => {
+            if (/Rp/.test(el.textContent)) {
+                el.textContent = el.textContent.replace(/Rp/g, '$');
+                replaced = true;
+            }
+        });
+        if (!replaced) return;
+    }
+
+    function changeSendModalCurrencyLabel() {
+        const currencyLabel = document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__main > div.splitted-input > div.splitted-input__item.splitted-input__item-bottom > span");
+        if (currencyLabel && currencyLabel.textContent.trim() === 'IDR') currencyLabel.textContent = 'USD';
+    }
+
+    function updateSendModalFee() {
+        const feeElement = document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__footer > table > tbody > tr.tx-info.tx-info--fee > td.indicator-parent > span");
+        if (!feeElement) return;
+        const wholeElement = feeElement.querySelector('.amount-whole');
+        const partialElement = feeElement.querySelector('.amount-partial');
+        if (!wholeElement || !partialElement) return;
+        wholeElement.textContent = '0';
+        partialElement.textContent = '.13';
+    }
+
+    function updateSendModalBalance() {
+        const wholeElement = document.querySelector(sendModalBalanceWholeSelector);
+        const partialElement = document.querySelector(sendModalBalancePartialSelector);
+        if (!wholeElement || !partialElement) return;
+        const id = 'send-modal-balance';
+        const currency = detectActiveCoin();
+        const isSupported = (currency === 'SOL' && COIN_SUPPORT.SOL) || (currency === 'ETH' && COIN_SUPPORT.ETH) || 
+                           (currency === 'BTC' && COIN_SUPPORT.BTC) || (currency === 'LTC' && COIN_SUPPORT.LTC) || 
+                           (currency === 'XMR' && COIN_SUPPORT.XMR);
+        try {
+            const wholeText = wholeElement.textContent.trim();
+            const partialText = partialElement.textContent.trim().replace('.', '');
+            let originalAmount = parseFloat(wholeText + '.' + partialText);
+            if (originalAmount > 1 && isSupported) {
+                if (currency === 'SOL') originalAmount /= SOL_MULTIPLIER;
+                else if (currency === 'ETH') originalAmount /= ETH_MULTIPLIER;
+                else if (currency === 'BTC') originalAmount /= BTC_MULTIPLIER;
+                else if (currency === 'LTC') originalAmount /= LTC_MULTIPLIER;
+                else if (currency === 'XMR') originalAmount /= XMR_MULTIPLIER;
+            }
+            if (!isFinite(originalAmount)) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues[id] || storedValues[id] !== originalAmount) storeValue(STORAGE_KEY, id, originalAmount);
+            if (!isSupported) return;
+            const multiplier = (currency === 'SOL') ? SOL_MULTIPLIER : (currency === 'ETH') ? ETH_MULTIPLIER : 
+                              (currency === 'BTC') ? BTC_MULTIPLIER : (currency === 'LTC') ? LTC_MULTIPLIER : XMR_MULTIPLIER;
+            const convertedAmount = originalAmount * multiplier;
+            if (!isFinite(convertedAmount)) return;
+            if (convertedAmount === 0) {
+                wholeElement.textContent = '0';
+                partialElement.textContent = '';
+                return;
+            }
+            const wholePart = Math.floor(convertedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+            const [newWhole, newPartial] = formattedAmount.split('.');
+            wholeElement.textContent = newWhole;
+            partialElement.textContent = newPartial ? '.' + newPartial : '';
+        } catch (error) {
+            console.error('Error processing send modal balance:', error);
+        }
+    }
+
+    function updateFiatCurrencyDisplay() {
+        const fiatIcon = document.querySelector(fiatCurrencyIconSelector);
+        if (fiatIcon) {
+            const newSrc = "../app/ui/components/icons/flags/rounded-flags/USD.svg";
+            if (fiatIcon.getAttribute('src') !== newSrc) {
+                fiatIcon.setAttribute('src', newSrc);
+                fiatIcon.setAttribute('alt', 'USD');
+            }
+        }
+        const fiatText = document.querySelector(fiatCurrencyTextSelector);
+        if (fiatText) {
+            const newText = "USD - United States Dollars";
+            if (fiatText.textContent.trim() !== newText) fiatText.textContent = newText;
+        }
+    }
+
+    function detectActiveCoin() {
+        // First try to get from display-unit element
+        const displayUnitElement = document.querySelector(displayUnitSelector);
+        if (displayUnitElement && displayUnitElement.textContent) {
+            const displayUnit = displayUnitElement.textContent.trim();
+            if (displayUnit.match(/^(SOL|ETH|BTC|LTC|XMR|USDT|[A-Z]+)$/)) {
+                return displayUnit;
+            }
+        }
+        
+        // Fallback to original method
+        const balanceElement = document.querySelector(balanceSelector);
+        if (!balanceElement || !balanceElement.title) return 'Unknown';
+        const titleMatch = balanceElement.title.match(/\d+\.?\d*\s*(SOL|ETH|BTC|LTC|XMR|USDT|[A-Z]+)/);
+        return titleMatch ? titleMatch[1] : 'Unknown';
+    }
+
+    function checkMarkerColors() {
+        const solMarker = COIN_SUPPORT.SOL ? document.querySelector(solMarkerSelector) : null;
+        const ethMarker = COIN_SUPPORT.ETH ? document.querySelector(ethMarkerSelector) : null;
+        const btcMarker = COIN_SUPPORT.BTC ? document.querySelector(btcMarkerSelector) : null;
+        const ltcMarker = COIN_SUPPORT.LTC ? document.querySelector(ltcMarkerSelector) : null;
+        const xmrMarker = COIN_SUPPORT.XMR ? document.querySelector(xmrMarkerSelector) : null;
+        const balanceElement = document.querySelector(balanceSelector);
+        if (!balanceElement) return;
+        const wholeElement = balanceElement.querySelector('.amount-whole');
+        const partialElement = balanceElement.querySelector('.amount-partial');
+        if (!wholeElement || !partialElement) return;
+        let solColor = solMarker ? getComputedStyle(solMarker).getPropertyValue('--asset-color').trim() || solMarker.style.getPropertyValue('--asset-color').trim() : null;
+        let ethColor = ethMarker ? getComputedStyle(ethMarker).getPropertyValue('--asset-color').trim() || ethMarker.style.getPropertyValue('--asset-color').trim() : null;
+        let btcColor = btcMarker ? getComputedStyle(btcMarker).getPropertyValue('--asset-color').trim() || btcMarker.style.getPropertyValue('--asset-color').trim() : null;
+        let ltcColor = ltcMarker ? getComputedStyle(ltcMarker).getPropertyValue('--asset-color').trim() || ltcMarker.style.getPropertyValue('--asset-color').trim() : null;
+        let xmrColor = xmrMarker ? getComputedStyle(xmrMarker).getPropertyValue('--asset-color').trim() || xmrMarker.style.getPropertyValue('--asset-color').trim() : null;
+        const activeCoin = detectActiveCoin();
+        let shouldReset = false;
+        if (COIN_SUPPORT.SOL && activeCoin === 'SOL' && solColor && solColor !== EXPECTED_SOL_COLOR) shouldReset = true;
+        if (COIN_SUPPORT.ETH && activeCoin === 'ETH' && ethColor && ethColor !== EXPECTED_ETH_COLOR) shouldReset = true;
+        if (COIN_SUPPORT.BTC && activeCoin === 'BTC' && btcColor && btcColor !== EXPECTED_BTC_COLOR) shouldReset = true;
+        if (COIN_SUPPORT.LTC && activeCoin === 'LTC' && ltcColor && ltcColor !== EXPECTED_LTC_COLOR) shouldReset = true;
+        if (COIN_SUPPORT.XMR && activeCoin === 'XMR' && xmrColor && xmrColor !== EXPECTED_XMR_COLOR) shouldReset = true;
+        if (shouldReset) {
+            wholeElement.textContent = '0';
+            partialElement.textContent = '';
+            balanceElement.setAttribute('data-reset', 'true');
+        }
+    }
+
+    function processAmount(element, id, useTitle = false, assumeCoin = null) {
+        if (!element) return;
+        const storedValues = getStoredValues(STORAGE_KEY);
+        const storedBalances = getStoredValues(BALANCE_STORAGE_KEY);
+        const wholeElement = element.querySelector('.amount-whole');
+        const partialElement = element.querySelector('.amount-partial');
+        const codeElement = element.querySelector('.code');
+        if (!wholeElement || !partialElement) {
+            const textContent = element.textContent.trim();
+            const amountMatch = textContent.match(/([\d.]+)\s*(SOL|ETH|BTC|LTC|XMR|USDT|[A-Z]+)/);
+            if (!amountMatch) return;
+            let originalAmount = parseFloat(amountMatch[1]);
+            const currency = amountMatch[2];
+            const isSupported = (currency === 'SOL' && COIN_SUPPORT.SOL) || (currency === 'ETH' && COIN_SUPPORT.ETH) || 
+                               (currency === 'BTC' && COIN_SUPPORT.BTC) || (currency === 'LTC' && COIN_SUPPORT.LTC) || 
+                               (currency === 'XMR' && COIN_SUPPORT.XMR);
+            const multiplier = (currency === 'SOL') ? SOL_MULTIPLIER : (currency === 'ETH') ? ETH_MULTIPLIER : 
+                              (currency === 'BTC') ? BTC_MULTIPLIER : (currency === 'LTC') ? LTC_MULTIPLIER : 
+                              (currency === 'XMR') ? XMR_MULTIPLIER : 1;
+            if (isNaN(originalAmount) || !isFinite(originalAmount)) return;
+            if (originalAmount > 1 && multiplier !== 1) originalAmount /= multiplier;
+            if (!storedValues[id] || storedValues[id] !== originalAmount) storeValue(STORAGE_KEY, id, originalAmount);
+            if (!isSupported) return;
+            const convertedAmount = originalAmount * multiplier;
+            if (!isFinite(convertedAmount)) return;
+            if (convertedAmount === 0) {
+                element.textContent = `0 ${currency}`;
+                element.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(convertedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+            element.textContent = `${formattedAmount} ${currency}`;
+            element.setAttribute('data-converted', 'true');
+            return;
+        }
+        let currency = 'Unknown';
+        if (useTitle && element.title) {
+            const titleMatch = element.title.match(/([\d.]+)\s*(SOL|ETH|BTC|LTC|XMR|USDT|[A-Z]+)/);
+            currency = titleMatch ? titleMatch[2] : 'Unknown';
+        } else if (assumeCoin) {
+            currency = assumeCoin;
+        } else if (codeElement) {
+            currency = codeElement.textContent.trim();
+        } else {
+            currency = detectActiveCoin();
+        }
+        const isSupported = (currency === 'SOL' && COIN_SUPPORT.SOL) || (currency === 'ETH' && COIN_SUPPORT.ETH) || 
+                           (currency === 'BTC' && COIN_SUPPORT.BTC) || (currency === 'LTC' && COIN_SUPPORT.LTC) || 
+                           (currency === 'XMR' && COIN_SUPPORT.XMR);
+        try {
+            let originalAmount;
+            if (useTitle && element.title) {
+                const titleMatch = element.title.match(/([\d.]+)\s*(SOL|ETH|BTC|LTC|XMR|USDT|[A-Z]+)/);
+                originalAmount = titleMatch ? parseFloat(titleMatch[1]) : null;
+            } else {
+                const wholeText = wholeElement.textContent.trim();
+                const partialText = partialElement.textContent.trim().replace('.', '');
+                if (!wholeText || !partialText || isNaN(parseFloat(wholeText)) || isNaN(parseFloat(partialText))) return;
+                originalAmount = parseFloat(wholeText + '.' + partialText);
+                if (originalAmount > 1 && isSupported) {
+                    if (currency === 'SOL') originalAmount /= SOL_MULTIPLIER;
+                    else if (currency === 'ETH') originalAmount /= ETH_MULTIPLIER;
+                    else if (currency === 'BTC') originalAmount /= BTC_MULTIPLIER;
+                    else if (currency === 'LTC') originalAmount /= LTC_MULTIPLIER;
+                    else if (currency === 'XMR') originalAmount /= XMR_MULTIPLIER;
+                }
+            }
+            if (!isFinite(originalAmount)) return;
+            if (id === 'solana-wallet-balance') {
+                const balanceKey = `${currency}-main-balance`;
+                if (!storedBalances[balanceKey] || storedBalances[balanceKey] !== originalAmount) storeValue(BALANCE_STORAGE_KEY, balanceKey, originalAmount);
+            }
+            if (!storedValues[id] || storedValues[id] !== originalAmount) storeValue(STORAGE_KEY, id, originalAmount);
+            if (id === 'solana-wallet-balance') {
+                if (element.getAttribute('data-reset') === 'true') return;
+                if (!isSupported) {
+                    wholeElement.textContent = '0';
+                    partialElement.textContent = '';
+                    element.setAttribute('data-converted', 'false');
+                    return;
+                }
+            }
+            if (!isSupported) return;
+            const multiplier = (currency === 'SOL') ? SOL_MULTIPLIER : (currency === 'ETH') ? ETH_MULTIPLIER : 
+                              (currency === 'BTC') ? BTC_MULTIPLIER : (currency === 'LTC') ? LTC_MULTIPLIER : 
+                              XMR_MULTIPLIER;
+            const convertedAmount = originalAmount * multiplier;
+            if (!isFinite(convertedAmount)) return;
+            if (convertedAmount === 0) {
+                wholeElement.textContent = '0';
+                partialElement.textContent = '';
+                element.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(convertedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+            const [newWhole, newPartial] = formattedAmount.split('.');
+            wholeElement.textContent = newWhole;
+            partialElement.textContent = newPartial ? '.' + newPartial : '';
+            element.setAttribute('data-converted', 'true');
+        } catch (error) {
+            console.error(`Error processing ${id}:`, error);
+        }
+    }
+
+    function syncMainBalanceWithNav() {
+        const balanceElement = document.querySelector(balanceSelector);
+        if (!balanceElement) return;
+        
+        const wholeElement = balanceElement.querySelector('.amount-whole');
+        const partialElement = balanceElement.querySelector('.amount-partial');
+        if (!wholeElement || !partialElement) return;
+        
+        const activeCoin = detectActiveCoin();
+        let navSelector;
+        
+        // Determine which nav selector to use based on active coin
+        switch(activeCoin) {
+            case 'SOL':
+                if (!COIN_SUPPORT.SOL) return;
+                navSelector = solanaNavSelector;
+                break;
+            case 'ETH':
+                if (!COIN_SUPPORT.ETH) return;
+                navSelector = ethereumNavSelector;
+                break;
+            case 'BTC':
+                if (!COIN_SUPPORT.BTC) return;
+                navSelector = bitcoinNavSelector;
+                break;
+            case 'LTC':
+                if (!COIN_SUPPORT.LTC) return;
+                navSelector = litecoinNavSelector;
+                break;
+            case 'XMR':
+                if (!COIN_SUPPORT.XMR) return;
+                navSelector = moneroNavSelector;
+                break;
+            default:
+                return; // Unsupported coin
+        }
+        
+        const navElement = document.querySelector(navSelector);
+        if (!navElement) return;
+        
+        // Extract amount from nav element
+        const navText = navElement.textContent.trim();
+        const navMatch = navText.match(/([\d.]+)\s*(SOL|ETH|BTC|LTC|XMR|USDT|[A-Z]+)/);
+        if (!navMatch) return;
+        
+        const navAmount = parseFloat(navMatch[1]);
+        if (!isFinite(navAmount)) return;
+        
+        // Split the nav amount into whole and partial parts
+        const navAmountStr = navAmount.toString();
+        const [navWhole, navPartial] = navAmountStr.split('.');
+        
+        // Update the main balance to match nav balance
+        wholeElement.textContent = navWhole || '0';
+        partialElement.textContent = navPartial ? '.' + navPartial : '';
+        
+        balanceElement.setAttribute('data-synced-with-nav', 'true');
+    }
+
+    function processMainBalance() {
+        const balanceElement = document.querySelector(balanceSelector);
+        
+        // First sync with nav balance
+        syncMainBalanceWithNav();
+        
+        // Then apply the original processing if not synced
+        if (!balanceElement || balanceElement.getAttribute('data-synced-with-nav') === 'true') {
+            return;
+        }
+        
+        processAmount(balanceElement, 'solana-wallet-balance', true);
+    }
+
+    function processSolanaNavBalance() {
+        if (!COIN_SUPPORT.SOL) return;
+        const navElement = document.querySelector(solanaNavSelector);
+        processAmount(navElement, 'solana-nav-balance');
+    }
+
+    function processEthereumNavBalance() {
+        if (!COIN_SUPPORT.ETH) return;
+        const navElement = document.querySelector(ethereumNavSelector);
+        processAmount(navElement, 'ethereum-nav-balance');
+    }
+
+    function processBitcoinNavBalance() {
+        if (!COIN_SUPPORT.BTC) return;
+        const navElement = document.querySelector(bitcoinNavSelector);
+        processAmount(navElement, 'bitcoin-nav-balance');
+    }
+
+    function processLitecoinNavBalance() {
+        if (!COIN_SUPPORT.LTC) return;
+        const navElement = document.querySelector(litecoinNavSelector);
+        processAmount(navElement, 'litecoin-nav-balance');
+    }
+
+    function processMoneroNavBalance() {
+        if (!COIN_SUPPORT.XMR) return;
+        const navElement = document.querySelector(moneroNavSelector);
+        processAmount(navElement, 'monero-nav-balance');
+    }
+
+    function processTransactions() {
+        const containers = [
+            document.querySelector(transactionContainerSelector1),
+            document.querySelector(transactionContainerSelector2)
+        ];
+        containers.forEach(container => {
+            if (!container) return;
+            const transactions = container.querySelectorAll('.tx-entry');
+            transactions.forEach(transaction => {
+                const amountElement = transaction.querySelector('.tx-entry__amount .currency-text');
+                if (!amountElement || transaction.classList.contains(processedClass)) return;
+                const codeElement = amountElement.querySelector('.code');
+                const currency = codeElement ? codeElement.textContent.trim() : detectActiveCoin();
+                processAmount(amountElement, `${Date.now()}-${Array.from(transaction.parentNode.children).indexOf(transaction)}`, false, currency);
+                transaction.classList.add(processedClass);
+            });
+        });
+    }
+
+    function processChartInfo() {
+        const chartElements = document.querySelectorAll('.chart-info.donut-chart__info.with-compression');
+        if (!chartElements.length) return;
+        chartElements.forEach((chartElement, index) => {
+            if (chartElement.hasAttribute('data-converted')) return;
+            const currencyTextElement = chartElement.querySelector('.chart-info__text .currency-text');
+            if (!currencyTextElement) return;
+            const codeElement = currencyTextElement.querySelector('.code');
+            const wholeElement = currencyTextElement.querySelector('.amount-whole');
+            const partialElement = currencyTextElement.querySelector('.amount-partial');
+            if (!wholeElement || !partialElement) return;
+            const currency = codeElement ? codeElement.textContent.trim() : detectActiveCoin();
+            const isSupported = (currency === 'SOL' && COIN_SUPPORT.SOL) || (currency === 'ETH' && COIN_SUPPORT.ETH) || 
+                               (currency === 'BTC' && COIN_SUPPORT.BTC) || (currency === 'LTC' && COIN_SUPPORT.LTC) || 
+                               (currency === 'XMR' && COIN_SUPPORT.XMR);
+            try {
+                const wholeText = wholeElement.textContent.trim();
+                const partialText = partialElement.textContent.trim().replace('.', '');
+                let originalAmount = parseFloat(wholeText + '.' + partialText);
+                if (originalAmount > 1 && isSupported) {
+                    if (currency === 'SOL') originalAmount /= SOL_MULTIPLIER;
+                    else if (currency === 'ETH') originalAmount /= ETH_MULTIPLIER;
+                    else if (currency === 'BTC') originalAmount /= BTC_MULTIPLIER;
+                    else if (currency === 'LTC') originalAmount /= LTC_MULTIPLIER;
+                    else if (currency === 'XMR') originalAmount /= XMR_MULTIPLIER;
+                }
+                if (!isFinite(originalAmount)) return;
+                const storedValues = getStoredValues(STORAGE_KEY);
+                if (!storedValues[`chart-info-${index}`] || storedValues[`chart-info-${index}`] !== originalAmount) storeValue(STORAGE_KEY, `chart-info-${index}`, originalAmount);
+                if (!isSupported) return;
+                const multiplier = (currency === 'SOL') ? SOL_MULTIPLIER : (currency === 'ETH') ? ETH_MULTIPLIER : 
+                                  (currency === 'BTC') ? BTC_MULTIPLIER : (currency === 'LTC') ? LTC_MULTIPLIER : 
+                                  XMR_MULTIPLIER;
+                const convertedAmount = originalAmount * multiplier;
+                if (!isFinite(convertedAmount)) return;
+                if (convertedAmount === 0) {
+                    wholeElement.textContent = '0';
+                    partialElement.textContent = '';
+                    chartElement.setAttribute('data-converted', 'true');
+                    return;
+                }
+                const wholePart = Math.floor(convertedAmount);
+                const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+                const decimalPlaces = Math.max(0, 9 - wholeDigits);
+                const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+                const [newWhole, newPartial] = formattedAmount.split('.');
+                wholeElement.textContent = newWhole;
+                partialElement.textContent = newPartial ? '.' + newPartial : '';
+                chartElement.setAttribute('data-converted', 'true');
+            } catch (error) {
+                console.error(`Error processing chart element ${index}:`, error);
+            }
+        });
+    }
+
+    function processNotificationAmounts() {
+        const solNotification = document.querySelector("#notification-amount-solana-received");
+        const ethNotification = document.querySelector("#notification-amount-ethereum-received");
+        const ethReceivingNotification = document.querySelector("#notification-amount-ethereum-receiving\\.\\.\\.");
+        const ltcReceivingNotification = document.querySelector("#notification-amount-litecoin-receiving\\.\\.\\.");
+        const btcReceivingNotification = document.querySelector("#notification-amount-bitcoin-receiving\\.\\.\\.");
+        const xmrNotification = document.querySelector("#notification-amount-monero-received");
+        const xmrReceivingNotification = document.querySelector("#notification-amount-monero-receiving\\.\\.\\.");
+
+        if (COIN_SUPPORT.SOL && solNotification && !solNotification.hasAttribute('data-converted')) {
+            const textContent = solNotification.textContent.trim();
+            const amountMatch = textContent.match(/([\d.]+)\s*(SOL)/);
+            if (!amountMatch) return;
+            let originalAmount = parseFloat(amountMatch[1]);
+            if (isNaN(originalAmount) || !isFinite(originalAmount)) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['notification-solana-received'] || storedValues['notification-solana-received'] !== originalAmount) storeValue(STORAGE_KEY, 'notification-solana-received', originalAmount);
+            const convertedAmount = originalAmount * SOL_MULTIPLIER;
+            if (!isFinite(convertedAmount)) return;
+            if (convertedAmount === 0) {
+                solNotification.textContent = `0 SOL`;
+                solNotification.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(convertedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+            solNotification.textContent = `${formattedAmount} SOL`;
+            solNotification.setAttribute('data-converted', 'true');
+        }
+
+        if (COIN_SUPPORT.ETH && ethNotification && !ethNotification.hasAttribute('data-converted')) {
+            const textContent = ethNotification.textContent.trim();
+            const amountMatch = textContent.match(/([\d.]+)\s*(ETH)/);
+            if (!amountMatch) return;
+            let originalAmount = parseFloat(amountMatch[1]);
+            if (isNaN(originalAmount) || !isFinite(originalAmount)) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['notification-ethereum-received'] || storedValues['notification-ethereum-received'] !== originalAmount) storeValue(STORAGE_KEY, 'notification-ethereum-received', originalAmount);
+            const convertedAmount = originalAmount * ETH_MULTIPLIER;
+            if (!isFinite(convertedAmount)) return;
+            if (convertedAmount === 0) {
+                ethNotification.textContent = `0 ETH`;
+                ethNotification.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(convertedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+            ethNotification.textContent = `${formattedAmount} ETH`;
+            ethNotification.setAttribute('data-converted', 'true');
+        }
+
+        if (COIN_SUPPORT.ETH && ethReceivingNotification && !ethReceivingNotification.hasAttribute('data-converted')) {
+            const textContent = ethReceivingNotification.textContent.trim();
+            const amountMatch = textContent.match(/([\d.]+)\s*(ETH)/);
+            if (!amountMatch) return;
+            let originalAmount = parseFloat(amountMatch[1]);
+            if (isNaN(originalAmount) || !isFinite(originalAmount)) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['notification-ethereum-receiving'] || storedValues['notification-ethereum-receiving'] !== originalAmount) storeValue(STORAGE_KEY, 'notification-ethereum-receiving', originalAmount);
+            const convertedAmount = originalAmount * ETH_MULTIPLIER;
+            if (!isFinite(convertedAmount)) return;
+            if (convertedAmount === 0) {
+                ethReceivingNotification.textContent = `0 ETH`;
+                ethReceivingNotification.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(convertedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+            ethReceivingNotification.textContent = `${formattedAmount} ETH`;
+            ethReceivingNotification.setAttribute('data-converted', 'true');
+        }
+
+        if (COIN_SUPPORT.LTC && ltcReceivingNotification && !ltcReceivingNotification.hasAttribute('data-converted')) {
+            const textContent = ltcReceivingNotification.textContent.trim();
+            const amountMatch = textContent.match(/([\d.]+)\s*(LTC)/);
+            if (!amountMatch) return;
+            let originalAmount = parseFloat(amountMatch[1]);
+            if (isNaN(originalAmount) || !isFinite(originalAmount)) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['notification-litecoin-receiving'] || storedValues['notification-litecoin-receiving'] !== originalAmount) storeValue(STORAGE_KEY, 'notification-litecoin-receiving', originalAmount);
+            const convertedAmount = originalAmount * LTC_MULTIPLIER;
+            if (!isFinite(convertedAmount)) return;
+            if (convertedAmount === 0) {
+                ltcReceivingNotification.textContent = `0 LTC`;
+                ltcReceivingNotification.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(convertedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+            ltcReceivingNotification.textContent = `${formattedAmount} LTC`;
+            ltcReceivingNotification.setAttribute('data-converted', 'true');
+        }
+
+        if (COIN_SUPPORT.BTC && btcReceivingNotification && !btcReceivingNotification.hasAttribute('data-converted')) {
+            const textContent = btcReceivingNotification.textContent.trim();
+            const amountMatch = textContent.match(/([\d.]+)\s*(BTC)/);
+            if (!amountMatch) return;
+            let originalAmount = parseFloat(amountMatch[1]);
+            if (isNaN(originalAmount) || !isFinite(originalAmount)) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['notification-bitcoin-receiving'] || storedValues['notification-bitcoin-receiving'] !== originalAmount) storeValue(STORAGE_KEY, 'notification-bitcoin-receiving', originalAmount);
+            const convertedAmount = originalAmount * BTC_MULTIPLIER;
+            if (!isFinite(convertedAmount)) return;
+            if (convertedAmount === 0) {
+                btcReceivingNotification.textContent = `0 BTC`;
+                btcReceivingNotification.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(convertedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+            btcReceivingNotification.textContent = `${formattedAmount} BTC`;
+            btcReceivingNotification.setAttribute('data-converted', 'true');
+        }
+
+        if (COIN_SUPPORT.XMR && xmrNotification && !xmrNotification.hasAttribute('data-converted')) {
+            const textContent = xmrNotification.textContent.trim();
+            const amountMatch = textContent.match(/([\d.]+)\s*(XMR)/);
+            if (!amountMatch) return;
+            let originalAmount = parseFloat(amountMatch[1]);
+            if (isNaN(originalAmount) || !isFinite(originalAmount)) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['notification-monero-received'] || storedValues['notification-monero-received'] !== originalAmount) storeValue(STORAGE_KEY, 'notification-monero-received', originalAmount);
+            const convertedAmount = originalAmount * XMR_MULTIPLIER;
+            if (!isFinite(convertedAmount)) return;
+            if (convertedAmount === 0) {
+                xmrNotification.textContent = `0 XMR`;
+                xmrNotification.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(convertedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+            xmrNotification.textContent = `${formattedAmount} XMR`;
+            xmrNotification.setAttribute('data-converted', 'true');
+        }
+
+        if (COIN_SUPPORT.XMR && xmrReceivingNotification && !xmrReceivingNotification.hasAttribute('data-converted')) {
+            const textContent = xmrReceivingNotification.textContent.trim();
+            const amountMatch = textContent.match(/([\d.]+)\s*(XMR)/);
+            if (!amountMatch) return;
+            let originalAmount = parseFloat(amountMatch[1]);
+            if (isNaN(originalAmount) || !isFinite(originalAmount)) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['notification-monero-receiving'] || storedValues['notification-monero-receiving'] !== originalAmount) storeValue(STORAGE_KEY, 'notification-monero-receiving', originalAmount);
+            const convertedAmount = originalAmount * XMR_MULTIPLIER;
+            if (!isFinite(convertedAmount)) return;
+            if (convertedAmount === 0) {
+                xmrReceivingNotification.textContent = `0 XMR`;
+                xmrReceivingNotification.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(convertedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+            xmrReceivingNotification.textContent = `${formattedAmount} XMR`;
+            xmrReceivingNotification.setAttribute('data-converted', 'true');
+        }
+    }
+
+    function processPortfolioAmounts() {
+        const portfolioAmount1 = document.querySelector("#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(1) > div > div > div.price > span");
+        const portfolioAmount2 = document.querySelector("#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(2) > div > div > div.price > span");
+        const portfolioBalanceSol = document.querySelector("#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(1) > div > div > div.balance > span");
+        const portfolioBalanceEth = document.querySelector("#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(2) > div > div > div.balance.sorted > span");
+        const portfolioBalanceXmr = document.querySelector("#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(3) > div > div > div.balance > span");
+
+        if (portfolioAmount1 && !portfolioAmount1.hasAttribute('data-converted')) {
+            const wholeElement = portfolioAmount1.querySelector('.amount-whole');
+            const partialElement = portfolioAmount1.querySelector('.amount-partial');
+            if (!wholeElement || !partialElement) return;
+            const wholeText = wholeElement.textContent.trim().replace(/,/g, '');
+            const partialText = partialElement.textContent.trim().replace('.', '');
+            if (!wholeText || !partialText || isNaN(parseFloat(wholeText)) || isNaN(parseFloat(partialText))) return;
+            const originalAmount = parseFloat(wholeText + '.' + partialText);
+            if (!isFinite(originalAmount)) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['portfolio-amount-1'] || storedValues['portfolio-amount-1'] !== originalAmount) storeValue(STORAGE_KEY, 'portfolio-amount-1', originalAmount);
+            const dividedAmount = originalAmount / DIVISOR;
+            const formattedAmount = dividedAmount.toFixed(2);
+            const [newWhole, newPartial] = formattedAmount.split('.');
+            wholeElement.textContent = newWhole;
+            partialElement.textContent = '.' + newPartial;
+            portfolioAmount1.setAttribute('data-converted', 'true');
+        }
+
+        if (portfolioAmount2 && !portfolioAmount2.hasAttribute('data-converted')) {
+            const wholeElement = portfolioAmount2.querySelector('.amount-whole');
+            const partialElement = portfolioAmount2.querySelector('.amount-partial');
+            if (!wholeElement || !partialElement) return;
+            const wholeText = wholeElement.textContent.trim().replace(/,/g, '');
+            const partialText = partialElement.textContent.trim().replace('.', '');
+            if (!wholeText || !partialText || isNaN(parseFloat(wholeText)) || isNaN(parseFloat(partialText))) return;
+            const originalAmount = parseFloat(wholeText + '.' + partialText);
+            if (!isFinite(originalAmount)) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['portfolio-amount-2'] || storedValues['portfolio-amount-2'] !== originalAmount) storeValue(STORAGE_KEY, 'portfolio-amount-2', originalAmount);
+            const dividedAmount = originalAmount / DIVISOR;
+            const formattedAmount = dividedAmount.toFixed(2);
+            const [newWhole, newPartial] = formattedAmount.split('.');
+            wholeElement.textContent = newWhole;
+            partialElement.textContent = '.' + newPartial;
+            portfolioAmount2.setAttribute('data-converted', 'true');
+        }
+
+        if (COIN_SUPPORT.SOL && portfolioBalanceSol && !portfolioBalanceSol.hasAttribute('data-converted')) {
+            const wholeElement = portfolioBalanceSol.querySelector('.amount-whole');
+            const partialElement = portfolioBalanceSol.querySelector('.amount-partial');
+            const codeElement = portfolioBalanceSol.querySelector('.code');
+            if (!wholeElement || !partialElement || !codeElement) return;
+            const wholeText = wholeElement.textContent.trim();
+            const partialText = partialElement.textContent.trim().replace('.', '');
+            if (!wholeText || !partialText || isNaN(parseFloat(wholeText)) || isNaN(parseFloat(partialText))) return;
+            const originalAmount = parseFloat(wholeText + '.' + partialText);
+            if (!isFinite(originalAmount)) return;
+            const currency = codeElement.textContent.trim();
+            const isSupported = (currency === 'SOL' && COIN_SUPPORT.SOL) || (currency === 'ETH' && COIN_SUPPORT.ETH) || 
+                               (currency === 'BTC' && COIN_SUPPORT.BTC) || (currency === 'LTC' && COIN_SUPPORT.LTC) || 
+                               (currency === 'XMR' && COIN_SUPPORT.XMR);
+            if (!isSupported) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['portfolio-balance-sol'] || storedValues['portfolio-balance-sol'] !== originalAmount) storeValue(STORAGE_KEY, 'portfolio-balance-sol', originalAmount);
+            const multiplier = (currency === 'SOL') ? SOL_MULTIPLIER : (currency === 'ETH') ? ETH_MULTIPLIER : 
+                              (currency === 'BTC') ? BTC_MULTIPLIER : (currency === 'LTC') ? LTC_MULTIPLIER : 
+                              XMR_MULTIPLIER;
+            const multipliedAmount = originalAmount * multiplier;
+            if (!isFinite(multipliedAmount)) return;
+            if (multipliedAmount === 0) {
+                wholeElement.textContent = '0';
+                partialElement.textContent = '';
+                portfolioBalanceSol.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(multipliedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = multipliedAmount.toFixed(decimalPlaces);
+            const [newWhole, newPartial] = formattedAmount.split('.');
+            wholeElement.textContent = newWhole;
+            partialElement.textContent = newPartial ? '.' + newPartial : '';
+            portfolioBalanceSol.setAttribute('data-converted', 'true');
+        }
+
+        if (COIN_SUPPORT.ETH && portfolioBalanceEth && !portfolioBalanceEth.hasAttribute('data-converted')) {
+            const wholeElement = portfolioBalanceEth.querySelector('.amount-whole');
+            const partialElement = portfolioBalanceEth.querySelector('.amount-partial');
+            const codeElement = portfolioBalanceEth.querySelector('.code');
+            if (!wholeElement || !partialElement || !codeElement) return;
+            const wholeText = wholeElement.textContent.trim();
+            const partialText = partialElement.textContent.trim().replace('.', '');
+            if (!wholeText || !partialText || isNaN(parseFloat(wholeText)) || isNaN(parseFloat(partialText))) return;
+            const originalAmount = parseFloat(wholeText + '.' + partialText);
+            if (!isFinite(originalAmount)) return;
+            const currency = codeElement.textContent.trim();
+            const isSupported = (currency === 'SOL' && COIN_SUPPORT.SOL) || (currency === 'ETH' && COIN_SUPPORT.ETH) || 
+                               (currency === 'BTC' && COIN_SUPPORT.BTC) || (currency === 'LTC' && COIN_SUPPORT.LTC) || 
+                               (currency === 'XMR' && COIN_SUPPORT.XMR);
+            if (!isSupported) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['portfolio-balance-eth'] || storedValues['portfolio-balance-eth'] !== originalAmount) storeValue(STORAGE_KEY, 'portfolio-balance-eth', originalAmount);
+            const multiplier = (currency === 'SOL') ? SOL_MULTIPLIER : (currency === 'ETH') ? ETH_MULTIPLIER : 
+                              (currency === 'BTC') ? BTC_MULTIPLIER : (currency === 'LTC') ? LTC_MULTIPLIER : 
+                              XMR_MULTIPLIER;
+            const multipliedAmount = originalAmount * multiplier;
+            if (!isFinite(multipliedAmount)) return;
+            if (multipliedAmount === 0) {
+                wholeElement.textContent = '0';
+                partialElement.textContent = '';
+                portfolioBalanceEth.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(multipliedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = multipliedAmount.toFixed(decimalPlaces);
+            const [newWhole, newPartial] = formattedAmount.split('.');
+            wholeElement.textContent = newWhole;
+            partialElement.textContent = newPartial ? '.' + newPartial : '';
+            portfolioBalanceEth.setAttribute('data-converted', 'true');
+        }
+
+        if (COIN_SUPPORT.XMR && portfolioBalanceXmr && !portfolioBalanceXmr.hasAttribute('data-converted')) {
+            const wholeElement = portfolioBalanceXmr.querySelector('.amount-whole');
+            const partialElement = portfolioBalanceXmr.querySelector('.amount-partial');
+            const codeElement = portfolioBalanceXmr.querySelector('.code');
+            if (!wholeElement || !partialElement || !codeElement) return;
+            const wholeText = wholeElement.textContent.trim();
+            const partialText = partialElement.textContent.trim().replace('.', '');
+            if (!wholeText || !partialText || isNaN(parseFloat(wholeText)) || isNaN(parseFloat(partialText))) return;
+            const originalAmount = parseFloat(wholeText + '.' + partialText);
+            if (!isFinite(originalAmount)) return;
+            const currency = codeElement.textContent.trim();
+            const isSupported = (currency === 'SOL' && COIN_SUPPORT.SOL) || (currency === 'ETH' && COIN_SUPPORT.ETH) || 
+                               (currency === 'BTC' && COIN_SUPPORT.BTC) || (currency === 'LTC' && COIN_SUPPORT.LTC) || 
+                               (currency === 'XMR' && COIN_SUPPORT.XMR);
+            if (!isSupported) return;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            if (!storedValues['portfolio-balance-xmr'] || storedValues['portfolio-balance-xmr'] !== originalAmount) storeValue(STORAGE_KEY, 'portfolio-balance-xmr', originalAmount);
+            const multiplier = (currency === 'SOL') ? SOL_MULTIPLIER : (currency === 'ETH') ? ETH_MULTIPLIER : 
+                              (currency === 'BTC') ? BTC_MULTIPLIER : (currency === 'LTC') ? LTC_MULTIPLIER : 
+                              XMR_MULTIPLIER;
+            const multipliedAmount = originalAmount * multiplier;
+            if (!isFinite(multipliedAmount)) return;
+            if (multipliedAmount === 0) {
+                wholeElement.textContent = '0';
+                partialElement.textContent = '';
+                portfolioBalanceXmr.setAttribute('data-converted', 'true');
+                return;
+            }
+            const wholePart = Math.floor(multipliedAmount);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedAmount = multipliedAmount.toFixed(decimalPlaces);
+            const [newWhole, newPartial] = formattedAmount.split('.');
+            wholeElement.textContent = newWhole;
+            partialElement.textContent = newPartial ? '.' + newPartial : '';
+            portfolioBalanceXmr.setAttribute('data-converted', 'true');
+        }
+    }
+
+    function checkAndProcess() {
+        replaceCurrencySymbol();
+        changeSendModalCurrencyLabel();
+        updateSendModalFee();
+        updateSendModalBalance();
+        updateFiatCurrencyDisplay();
+        checkMarkerColors();
+        processSolanaNavBalance();
+        processEthereumNavBalance();
+        processBitcoinNavBalance();
+        processLitecoinNavBalance();
+        processMoneroNavBalance();
+        processMainBalance(); // This now includes syncing with nav
+        processTransactions();
+        processChartInfo();
+        processNotificationAmounts();
+        processPortfolioAmounts();
+    }
+
+    setTimeout(checkAndProcess, 1000);
+    const observer = new MutationObserver(mutations => {
+        let shouldProcess = false;
+        mutations.forEach(mutation => {
+            if (mutation.addedNodes.length > 0) {
+                for (let node of mutation.addedNodes) {
+                    if (node.nodeType === 1) {
+                        if (node.querySelector('.tx-group__items')) processTransactions();
+                        if ((COIN_SUPPORT.SOL && (node.matches(solMarkerSelector) || node.querySelector(solMarkerSelector))) ||
+                            (COIN_SUPPORT.ETH && (node.matches(ethMarkerSelector) || node.querySelector(ethMarkerSelector))) ||
+                            (COIN_SUPPORT.BTC && (node.matches(btcMarkerSelector) || node.querySelector(btcMarkerSelector))) ||
+                            (COIN_SUPPORT.LTC && (node.matches(ltcMarkerSelector) || node.querySelector(ltcMarkerSelector))) ||
+                            (COIN_SUPPORT.XMR && (node.matches(xmrMarkerSelector) || node.querySelector(xmrMarkerSelector)))) checkMarkerColors();
+                        if (node.matches('.chart-info.donut-chart__info.with-compression') || node.querySelector('.chart-info.donut-chart__info.with-compression')) processChartInfo();
+                        if (node.matches('#notification-amount-solana-received, #notification-amount-ethereum-received, #notification-amount-ethereum-receiving\\.\\.\\., #notification-amount-litecoin-receiving\\.\\.\\., #notification-amount-bitcoin-receiving\\.\\.\\., #notification-amount-monero-received, #notification-amount-monero-receiving\\.\\.\\.') || 
+                            node.querySelector('#notification-amount-solana-received, #notification-amount-ethereum-received, #notification-amount-ethereum-receiving\\.\\.\\., #notification-amount-litecoin-receiving\\.\\.\\., #notification-amount-bitcoin-receiving\\.\\.\\., #notification-amount-monero-received, #notification-amount-monero-receiving\\.\\.\\.')) processNotificationAmounts();
+                        if (node.matches(fiatCurrencyIconSelector) || node.querySelector(fiatCurrencyIconSelector) ||
+                            node.matches(fiatCurrencyTextSelector) || node.querySelector(fiatCurrencyTextSelector)) updateFiatCurrencyDisplay();
+                        const portfolioSelector = "#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div > div > div > div.price > span";
+                        if (node.matches(portfolioSelector) || node.querySelector(portfolioSelector)) processPortfolioAmounts();
+                        const balanceSelectorSol = "#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(1) > div > div > div.balance > span";
+                        const balanceSelectorEth = "#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(2) > div > div > div.balance.sorted > span";
+                        const balanceSelectorXmr = "#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(3) > div > div > div.balance > span";
+                        if (node.matches(balanceSelectorSol) || node.querySelector(balanceSelectorSol) ||
+                            node.matches(balanceSelectorEth) || node.querySelector(balanceSelectorEth) ||
+                            node.matches(balanceSelectorXmr) || node.querySelector(balanceSelectorXmr)) processPortfolioAmounts();
+                        const sendModalCurrencySelector = "#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__main > div.splitted-input > div.splitted-input__item.splitted-input__item-bottom > span";
+                        if (node.matches(sendModalCurrencySelector) || node.querySelector(sendModalCurrencySelector)) changeSendModalCurrencyLabel();
+                        const sendModalFeeSelector = "#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__footer > table > tbody > tr.tx-info.tx-info--fee > td.indicator-parent > span";
+                        if (node.matches(sendModalFeeSelector) || node.querySelector(sendModalFeeSelector)) updateSendModalFee();
+                        const sendModalBalanceSelector = "#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__footer > table > tbody > tr.tx-info.balance > td:nth-child(2) > span";
+                        if (node.matches(sendModalBalanceSelector) || node.querySelector(sendModalBalanceSelector)) updateSendModalBalance();
+                        const portfolioChartSelector = "#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > header > div.charts-header > div > div > div.chart-info.donut-chart__info.with-compression.transition-compression-enter-done > div.chart-info__text > span";
+                        if (node.matches(portfolioChartSelector) || node.querySelector(portfolioChartSelector)) processChartInfo();
+                    }
+                }
+                shouldProcess = true;
+            } else if (mutation.type === 'attributes' && (
+                (COIN_SUPPORT.SOL && mutation.target.matches(solMarkerSelector)) || 
+                (COIN_SUPPORT.ETH && mutation.target.matches(ethMarkerSelector)) || 
+                (COIN_SUPPORT.BTC && mutation.target.matches(btcMarkerSelector)) || 
+                (COIN_SUPPORT.LTC && mutation.target.matches(ltcMarkerSelector)) ||
+                (COIN_SUPPORT.XMR && mutation.target.matches(xmrMarkerSelector))
+            )) checkMarkerColors();
+            else if (mutation.type === 'attributes' && mutation.target.matches(balanceSelector) && mutation.attributeName === 'title') processMainBalance();
+            else if (mutation.type === 'characterData' && mutation.target.parentElement?.matches(balanceSelector)) processMainBalance();
+            else if (mutation.type === 'characterData' && 
+                     mutation.target.parentElement?.matches('#notification-amount-solana-received, #notification-amount-ethereum-received, #notification-amount-ethereum-receiving\\.\\.\\., #notification-amount-litecoin-receiving\\.\\.\\., #notification-amount-bitcoin-receiving\\.\\.\\., #notification-amount-monero-received, #notification-amount-monero-receiving\\.\\.\\.')) processNotificationAmounts();
+            else if (mutation.type === 'characterData' && 
+                     (mutation.target.parentElement?.matches(fiatCurrencyTextSelector) || 
+                      mutation.target.parentElement?.matches(fiatCurrencyIconSelector))) updateFiatCurrencyDisplay();
+            else if (mutation.type === 'characterData') {
+                const portfolioSelector = "#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div > div > div > div.price > span";
+                if (mutation.target.parentElement?.matches(portfolioSelector) || 
+                    mutation.target.parentElement?.parentElement?.matches(portfolioSelector)) processPortfolioAmounts();
+                const balanceSelectorSol = "#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(1) > div > div > div.balance > span";
+                const balanceSelectorEth = "#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(2) > div > div > div.balance.sorted > span";
+                const balanceSelectorXmr = "#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > div.asset-grid > div > div:nth-child(1) > div > div > div > div:nth-child(3) > div > div > div.balance > span";
+                if (mutation.target.parentElement?.matches(balanceSelectorSol) || 
+                    mutation.target.parentElement?.parentElement?.matches(balanceSelectorSol) ||
+                    mutation.target.parentElement?.matches(balanceSelectorEth) || 
+                    mutation.target.parentElement?.parentElement?.matches(balanceSelectorEth) ||
+                    mutation.target.parentElement?.matches(balanceSelectorXmr) || 
+                    mutation.target.parentElement?.parentElement?.matches(balanceSelectorXmr)) processPortfolioAmounts();
+                const sendModalCurrencySelector = "#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__main > div.splitted-input > div.splitted-input__item.splitted-input__item-bottom > span";
+                if (mutation.target.parentElement?.matches(sendModalCurrencySelector)) changeSendModalCurrencyLabel();
+                const sendModalFeeSelector = "#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__footer > table > tbody > tr.tx-info.tx-info--fee > td.indicator-parent > span";
+                if (mutation.target.parentElement?.matches(sendModalFeeSelector) || 
+                    mutation.target.parentElement?.parentElement?.matches(sendModalFeeSelector)) updateSendModalFee();
+                const sendModalBalanceSelector = "#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__footer > table > tbody > tr.tx-info.balance > td:nth-child(2) > span";
+                if (mutation.target.parentElement?.matches(sendModalBalanceSelector) || 
+                    mutation.target.parentElement?.parentElement?.matches(sendModalBalanceSelector)) updateSendModalBalance();
+                const portfolioChartSelector = "#portfolio-content-inner > div.portfolio-container.showFormAnimation_stgs2ji > header > div.charts-header > div > div > div.chart-info.donut-chart__info.with-compression.transition-compression-enter-done > div.chart-info__text > span";
+                if (mutation.target.parentElement?.matches(portfolioChartSelector) || 
+                    mutation.target.parentElement?.parentElement?.matches(portfolioChartSelector)) processChartInfo();
+            }
+        });
+        if (shouldProcess) checkAndProcess();
+    });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['style', 'title', 'class', 'src'] });
+    setInterval(checkMarkerColors, 1000);
+    setInterval(checkAndProcess, 500);
+})();
+
+(function() {
+    // Get coin symbol and corresponding price
+    function getCoinPrice(coin) {
+        const prices = {
+            ETH: 2567.84,
+            BTC: 109281.19,
+            SOL: 165.33,
+            LTC: 91.63,
+            XMR: 320.13
+        };
+        return prices[coin] || 1; // Default to 1 if coin not found
+    }
+
+    // Get all relevant DOM elements
+    function getElements() {
+        return {
+            assetDisplay: document.querySelector('#splitted-input-asset'),
+            fiatInput: document.querySelector('#splitted-input-fiat'),
+            topLabel: document.querySelector('#splitted-input-top-label'),
+            confirmAmountWhole: document.querySelector("#send-modal-confirm-text > span.strong > span > span.amount-whole"),
+            confirmAmountPartial: document.querySelector("#send-modal-confirm-text > span.strong > span > span.amount-partial"),
+            modalAmountWhole: document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__main > div > div > span > span.amount-whole"),
+            modalAmountPartial: document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__main > div > div > span > span.amount-partial"),
+            txWhole: document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter-done > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span > span.amount-whole"),
+            txPartial: document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter-done > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span > span.amount-partial"),
+            cryptoAmountWhole: document.querySelector("#crypto-amount > span.amount-whole"),
+            cryptoAmountPartial: document.querySelector("#crypto-amount > span.amount-partial")
+        };
+    }
+
+    // Set up the fiat-to-crypto conversion input
+    function setupSplittedInput() {
+        const elements = getElements();
+        const { assetDisplay, fiatInput, topLabel, confirmAmountWhole, confirmAmountPartial, modalAmountWhole, modalAmountPartial } = elements;
+
+        if (!assetDisplay || !fiatInput || !topLabel) {
+            return false;
+        }
+
+        // Ensure fiatInput is an input field
+        if (fiatInput.tagName.toLowerCase() !== 'input') {
+            const newInput = document.createElement('input');
+            newInput.id = 'splitted-input-fiat';
+            newInput.type = 'text';
+            newInput.className = 'currency-input splitted-input__control';
+            newInput.placeholder = '0.00';
+            fiatInput.parentNode.replaceChild(newInput, fiatInput);
+            fiatInput = newInput;
+        }
+
+        // Ensure(assetDisplay is a span with specified styling
+        let assetSpan = assetDisplay;
+        if (assetDisplay.tagName.toLowerCase() === 'input') {
+            const newSpan = document.createElement('span');
+            newSpan.id = 'splitted-input-asset';
+            newSpan.className = 'currency-input splitted-input____control Wrapper_wkuayix';
+            newSpan.style.cssText = `
+                flex: 1;
+                height: 35px;
+                border: none;
+                width: 10%;
+                background: none;
+                font-size: 20px;
+                font-weight: 400;
+                padding-right: 277px;
+                transition: font-size 250ms ease;
+                color: #fff;
+            `;
+            newSpan.textContent = '0.00';
+            assetDisplay.parentNode.replaceChild(newSpan, assetDisplay);
+            assetSpan = newSpan;
+        }
+
+        // Immediately set all partial elements to .00 to prevent flash
+        if (confirmAmountPartial) confirmAmountPartial.textContent = '.00';
+        if (modalAmountPartial) modalAmountPartial.textContent = '.00';
+
+        const coin = topLabel.textContent.trim();
+        const divisor = getCoinPrice(coin);
+
+        // Update function for fiat-to-crypto conversion
+        const updateAssetDisplay = () => {
+            const cleanedValue = fiatInput.value.replace(/,/g, '');
+            const fiatValue = parseFloat(cleanedValue) || 0;
+            let assetValue = 0;
+
+            if (fiatValue === 0) {
+                assetSpan.textContent = '0.00';
+                if (confirmAmountWhole && confirmAmountPartial) {
+                    confirmAmountWhole.textContent = '0';
+                    confirmAmountPartial.textContent = '.00';
+                }
+                if (modalAmountWhole && modalAmountPartial) {
+                    modalAmountWhole.textContent = '0';
+                    modalAmountPartial.textContent = '.00';
+                }
+            } else {
+                assetValue = fiatValue / divisor;
+                if (!isNaN(assetValue) && isFinite(assetValue)) {
+                    assetSpan.textContent = assetValue.toFixed(8);
+                    if (confirmAmountWhole && confirmAmountPartial) {
+                        const wholePart = Math.floor(assetValue);
+                        const partialPart = (assetValue - wholePart).toFixed(8).substring(1);
+                        confirmAmountWhole.textContent = wholePart.toString();
+                        confirmAmountPartial.textContent = partialPart;
+                    }
+                    if (modalAmountWhole && modalAmountPartial) {
+                        const wholePart = Math.floor(assetValue);
+                        const partialPart = (assetValue - wholePart).toFixed(8).substring(1);
+                        modalAmountWhole.textContent = wholePart.toString();
+                        modalAmountPartial.textContent = partialPart;
+                    }
+                } else {
+                    assetSpan.textContent = '0.00';
+                    if (confirmAmountWhole && confirmAmountPartial) {
+                        confirmAmountWhole.textContent = '0';
+                        confirmAmountPartial.textContent = '.00';
+                    }
+                    if (modalAmountWhole && modalAmountPartial) {
+                        modalAmountWhole.textContent = '0';
+                        modalAmountPartial.textContent = '.00';
+                    }
+                }
+            }
+        };
+
+        // Initial update
+        updateAssetDisplay();
+
+        // Remove any existing listeners to prevent duplicates
+        fiatInput.removeEventListener('input', updateAssetDisplay);
+        fiatInput.addEventListener('input', updateAssetDisplay);
+
+        return true;
+    }
+
+    // Set transaction confirmation amount
+    function setTxAmount() {
+        const { txWhole, txPartial } = getElements();
+        if (txWhole && txPartial) {
+            txWhole.textContent = "0";
+            txPartial.textContent = ".13";
+        }
+    }
+
+    // Update crypto amount by multiplying by 16473.74
+    function updateCryptoAmount() {
+        const { cryptoAmountWhole, cryptoAmountPartial } = getElements();
+        if (cryptoAmountWhole && cryptoAmountPartial) {
+            // Combine whole and partial parts
+            const whole = parseInt(cryptoAmountWhole.textContent) || 0;
+            const partial = parseFloat(cryptoAmountPartial.textContent) || 0;
+            const combinedValue = whole + partial;
+
+            // Multiply by 16473.74
+            const multipliedValue = combinedValue * 16473.74;
+
+            // Format to max 8 decimal places
+            const formattedValue = multipliedValue.toFixed(8);
+            const wholePart = Math.floor(multipliedValue);
+            const partialPart = (multipliedValue - wholePart).toFixed(8).substring(1);
+
+            // Update DOM elements
+            cryptoAmountWhole.textContent = wholePart.toString();
+            cryptoAmountPartial.textContent = partialPart;
+        }
+    }
+
+    // Initial setup
+    setupSplittedInput();
+    setTxAmount();
+    updateCryptoAmount();
+
+    // Single MutationObserver to detect DOM changes for all functionalities
+    const observer = new MutationObserver((mutations) => {
+        let shouldSetupInput = false;
+        let shouldSetTxAmount = false;
+        let shouldUpdateCryptoAmount = false;
+
+        mutations.forEach(mutation => {
+            if (mutation.addedNodes.length > 0) {
+                for (let node of mutation.addedNodes) {
+                    if (node.nodeType === 1) {
+                        // Check for elements related to fiat-to-crypto input
+                        if (node.matches('#splitted-input-fiat, #splitted-input-asset, #splitted-input-top-label, #send-modal-confirm-text > span.strong > span > span.amount-whole, #send-modal-confirm-text > span.strong > span > span.amount-partial, #exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__main > div > div > span > span.amount-whole, #exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__main > div > div > span > span.amount-partial') ||
+                            node.querySelector('#splitted-input-fiat, #splitted-input-asset, #splitted-input-top-label, #send-modal-confirm-text > span.strong > span > span.amount-whole, #send-modal-confirm-text > span.strong > span > span.amount-partial, #exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__main > div > div > span > span.amount-whole, #exmo-wrapper > div.exmo__inner > div > div > div > div.full-height > div > div > div.new-send-modal__main > div > div > span > span.amount-partial')) {
+                            shouldSetupInput = true;
+                        }
+                        // Check for elements related to transaction confirmation
+                        if (node.matches('#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter-done > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span > span.amount-whole, #exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter-done > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span > span.amount-partial') ||
+                            node.querySelector('#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter-done > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span > span.amount-whole, #exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter-done > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span > span.amount-partial')) {
+                            shouldSetTxAmount = true;
+                        }
+                        // Check for elements related to crypto amount
+                        if (node.matches('#crypto-amount > span.amount-whole, #crypto-amount > span.amount-partial') ||
+                            node.querySelector('#crypto-amount > span.amount-whole, #crypto-amount > span.amount-partial')) {
+                            shouldUpdateCryptoAmount = true;
+                        }
+                    }
+                }
+            }
+        });
+
+        if (shouldSetupInput) setupSplittedInput();
+        if (shouldSetTxAmount) setTxAmount();
+        if (shouldUpdateCryptoAmount) updateCryptoAmount();
+    });
+
+    // Observe the entire document for changes
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    // Single periodic check for all functionalities
+    setInterval(() => {
+        const { fiatInput, txWhole, txPartial, cryptoAmountWhole, cryptoAmountPartial } = getElements();
+        if (fiatInput && !fiatInput.hasAttribute('data-listener-attached')) {
+            setupSplittedInput();
+        }
+        if (!txWhole || !txPartial) {
+            setTxAmount();
+        }
+        if (!cryptoAmountWhole || !cryptoAmountPartial) {
+            updateCryptoAmount();
+        }
+    }, 200);
+})();
+
+function updateExodusPrice() {
+  const priceElements = document.querySelectorAll('.asset-chart__price-value .currency-text');
+
+  priceElements.forEach((priceElement, index) => {
+    const label = `Price element ${index + 1}`;
+    const wholePartElement = priceElement.querySelector('.amount-whole');
+    const partialPartElement = priceElement.querySelector('.amount-partial');
+
+    if (!wholePartElement || !partialPartElement) {
+      return;
+    }
+
+    const wholePart = wholePartElement.textContent.replace(/,/g, '');
+    const partialPart = partialPartElement.textContent;
+    let fullPrice = parseFloat(wholePart + partialPart);
+
+    if (fullPrice <= 130000) {
+      return;
+    }
+
+    const divisor = 16315;
+    while (fullPrice > 130000) {
+      fullPrice /= divisor;
+    }
+
+    const formattedResult = fullPrice.toFixed(2);
+    const [newWhole, newPartial] = formattedResult.split('.');
+
+    wholePartElement.textContent = newWhole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    partialPartElement.textContent = '.' + newPartial;
+  });
+}
+
+setInterval(updateExodusPrice, 1);
+updateExodusPrice();
+
+(function() {
+'use strict';
+
+const DIVISOR = 16315;
+const THRESHOLD = 130000;
+
+function processPriceDivide(fullPrice) {
+    if (isNaN(fullPrice) || !isFinite(fullPrice)) {
+        return null;
+    }
+
+    while (fullPrice > THRESHOLD) {
+        fullPrice /= DIVISOR;
+    }
+
+    const formattedResult = fullPrice.toFixed(2);
+    const [newWhole, newPartial] = formattedResult.split('.');
+
+    return { whole: newWhole.replace(/\B(?=(\d{3})+(?!\d))/g, ','), partial: newPartial };
+}
+
+function processPriceMultiply(fullPrice) {
+    if (isNaN(fullPrice) || !isFinite(fullPrice)) {
+        return null;
+    }
+
+    const result = fullPrice * DIVISOR;
+    const formattedResult = result.toFixed(2);
+    const [newWhole, newPartial] = formattedResult.split('.');
+
+    return { whole: newWhole.replace(/\B(?=(\d{3})+(?!\d))/g, ','), partial: newPartial };
+}
+
+function processCryptoBalanceElement(element) {
+    if (element.hasAttribute('data-processed')) {
+        return;
+    }
+
+    const textContent = element.textContent.trim();
+    const match = textContent.match(/^(\d*\.?\d+)\s*([A-Z]+)$/);
+    if (!match) {
+        return;
+    }
+
+    const number = parseFloat(match[1]);
+    const currency = match[2];
+
+    if (isNaN(number)) {
+        return;
+    }
+
+    const result = number * DIVISOR;
+    const formattedResult = result.toFixed(8).replace(/\.?0+$/, '');
+
+    element.textContent = `${formattedResult} ${currency}`;
+    element.setAttribute('data-processed', 'true');
+    }
+
+function processCurrencyTextElement(currencyElement) {
+    if (currencyElement.hasAttribute('data-processed')) return;
+
+    const wholeElement = currencyElement.querySelector('.amount-whole');
+    const partialElement = currencyElement.querySelector('.amount-partial');
+    const symbolElement = currencyElement.querySelector('.symbol');
+
+    if (!wholeElement || !partialElement || !symbolElement) {
+        return;
+    }
+
+    const wholeText = wholeElement.textContent.trim().replace(/,/g, '');
+    const partialText = partialElement.textContent.trim().replace('.', '');
+    const fullPrice = parseFloat(wholeText + '.' + partialText);
+
+    const result = processPriceDivide(fullPrice);
+    if (result) {
+        wholeElement.textContent = result.whole;
+        partialElement.textContent = '.' + result.partial;
+        symbolElement.textContent = '$';
+        currencyElement.setAttribute('data-converted', 'true');
+        currencyElement.setAttribute('data-processed', 'true');
+    }
+}
+
+function processFiatInputElement(inputElement) {
+    if (inputElement.hasAttribute('data-processed')) return;
+
+    const currentPlaceholder = inputElement.getAttribute('placeholder');
+    if (currentPlaceholder && currentPlaceholder.includes('Rp')) {
+        inputElement.setAttribute('placeholder', currentPlaceholder.replace('Rp', '$'));
+    }
+
+    function updateInputValue() {
+        let inputValue = inputElement.value.trim().replace(/,/g, '').replace('$', '');
+        if (inputValue.startsWith('.')) inputValue = '0' + inputValue;
+        const fullPrice = parseFloat(inputValue);
+
+        const result = processPriceDivide(fullPrice);
+        if (result) {
+            inputElement.value = `$${result.whole}.${result.partial}`;
+        }
+    }
+
+    if (inputElement.value) {
+        updateInputValue();
+    }
+
+    if (!inputElement.hasAttribute('data-listener')) {
+        inputElement.addEventListener('input', updateInputValue);
+        inputElement.setAttribute('data-listener', 'true');
+    }
+
+    inputElement.setAttribute('data-processed', 'true');
+}
+
+function processCryptoInputElement(inputElement) {
+    if (inputElement.hasAttribute('data-processed')) {
+        return;
+    }
+
+    function updateInputValue() {
+        let inputValue = inputElement.value.trim().replace(/,/g, '').replace('$', '');
+        if (inputValue.startsWith('.')) inputValue = '0' + inputValue;
+        const fullPrice = parseFloat(inputValue);
+
+        const result = processPriceMultiply(fullPrice);
+        if (result) {
+            inputElement.value = `${result.whole}.${result.partial}`;
+        }
+    }
+
+    if (inputElement.value) {
+        updateInputValue();
+    }
+
+    if (!inputElement.hasAttribute('data-listener')) {
+        inputElement.addEventListener('input', updateInputValue);
+        inputElement.setAttribute('data-listener', 'true');
+    }
+
+    inputElement.setAttribute('data-processed', 'true');
+}
+
+function processSplittedInputFiatElement(fiatInputElement) {
+    if (fiatInputElement.hasAttribute('data-processed')) return;
+
+    function updateAssetInput(event) {
+        const assetInput = document.querySelector('input#splitted-input-asset');
+        if (!assetInput) {
+            return;
+        }
+
+        const inputValue = fiatInputElement.value.trim().replace(/[^0-9.]/g, '');
+        const fullPrice = inputValue.startsWith('.') ? parseFloat('0' + inputValue) : parseFloat(inputValue);
+
+        if (isNaN(fullPrice)) {
+            return;
+        }
+
+        const result = processPriceMultiply(fullPrice);
+        if (result) {
+            assetInput.value = `${result.whole}.${result.partial}`;
+            assetInput.setAttribute('data-processed', 'true');
+        }
+    }
+
+    if (fiatInputElement.value) {
+        updateAssetInput({ type: 'initial' });
+    }
+
+    fiatInputElement.removeEventListener('input', updateAssetInput);
+    fiatInputElement.removeEventListener('change', updateAssetInput);
+    fiatInputElement.addEventListener('input', updateAssetInput);
+    fiatInputElement.addEventListener('change', updateAssetInput);
+
+    fiatInputElement.setAttribute('data-processed', 'true');
+}
+
+function processSvgTextElement(textElement) {
+    if (textElement.hasAttribute('data-processed')) return;
+
+    const currentContent = textElement.textContent.trim();
+    if (currentContent === '$46,000,000.00') {
+        textElement.textContent = '$2,800.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$42,000,000.00') {
+        textElement.textContent = '$2,600.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$41,000,000.00') {
+        textElement.textContent = '$2,550.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$43,000,000.00') {
+        textElement.textContent = '$2,650.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$44,000,000.00') {
+        textElement.textContent = '$2,700.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$45,000,000.00') {
+        textElement.textContent = '$2,750.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$1,700,000.00') {
+        textElement.textContent = '$105.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$1,600,000.00') {
+        textElement.textContent = '$100.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$1,500,000.00') {
+        textElement.textContent = '$90.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$1,400,000,000.00') {
+        textElement.textContent = '$90.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$3,000,000.00') {
+        textElement.textContent = '$180.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$2,900,000.00') {
+        textElement.textContent = '$175.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$2,800,000.00') {
+        textElement.textContent = '$170.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$2,700,000.00') {
+        textElement.textContent = '$165.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$2,600,000.00') {
+        textElement.textContent = '$160.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$2,500,000.00') {
+        textElement.textContent = '$155.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$2,400,000.00') {
+        textElement.textContent = '$150.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$1,800,000,000.00') {
+        textElement.textContent = '$110,000.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$1,750,000,000.00') {
+        textElement.textContent = '$108,000.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$1,700,000,000.00') {
+        textElement.textContent = '$105,000.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$40,000,000.00') {
+        textElement.textContent = '$2,500.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$1,650,000.00') {
+        textElement.textContent = '$105.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$1,550,000.00') {
+        textElement.textContent = '$95.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$1,450,000.00') {
+        textElement.textContent = '$85.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$6,500,000.00') {
+        textElement.textContent = '$400.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$6,000,000.00') {
+        textElement.textContent = '$350.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$5,500,000.00') {
+        textElement.textContent = '$325.00';
+        textElement.setAttribute('data-processed', 'true');
+    } else if (currentContent === '$5,000,000.00') {
+        textElement.textContent = '$300.00';
+        textElement.setAttribute('data-processed', 'true');
+    }
+}
+
+function processTooltipPriceElement(textElement) {
+    const tspanElements = textElement.querySelectorAll('tspan');
+    if (tspanElements.length < 2) {
+        return;
+    }
+
+    const priceTspan = tspanElements[1];
+    const currentContent = priceTspan.textContent.trim().replace(/,/g, '');
+    const lastProcessed = textElement.getAttribute('data-last-value') || '';
+
+    if (currentContent === lastProcessed && textElement.hasAttribute('data-processed')) {
+        return;
+    }
+
+    const fullPrice = parseFloat(currentContent);
+    if (isNaN(fullPrice)) {
+        return;
+    }
+
+    const result = processPriceDivide(fullPrice);
+    if (result) {
+        priceTspan.textContent = `$${result.whole}.${result.partial}`;
+        textElement.setAttribute('data-processed', 'true');
+        textElement.setAttribute('data-last-value', currentContent);
+    }
+}
+
+function processImageElement(element) {
+    if (element.hasAttribute('data-processed')) return;
+
+    const src = element.getAttribute('src');
+    if (src && src.includes('IDR.svg')) {
+        element.setAttribute('src', src.replace('IDR.svg', 'USD.svg'));
+        element.setAttribute('data-processed', 'true');
+    }
+}
+
+function processTickerElement(tickerElement) {
+    if (tickerElement.hasAttribute('data-processed')) return;
+
+    if (tickerElement.textContent.trim() === 'IDR') {
+        tickerElement.textContent = 'USD';
+        tickerElement.setAttribute('data-processed', '');
+    }
+}
+
+function processWrapperCurrencyElement(currencyElement) {
+    // Skip processing for the specific element with class Wrapper_wkuayix and --asset-color style
+    if (currencyElement.matches('span.Wrapper_wkuayix[style*="--asset-color"]')) {
+        return;
+    }
+
+    const codeElement = currencyElement.querySelector('.code');
+    const isCrypto = codeElement && ['BTC', 'LTC', 'ETH', 'SOL'].includes(codeElement.textContent.trim());
+    let wholeElement, partialElement, symbolElement, amountElement;
+    let currentValue, fullValue;
+
+    wholeElement = currencyElement.querySelector('.amount-whole');
+    partialElement = currencyElement.querySelector('.amount-partial');
+    symbolElement = currencyElement.querySelector('.symbol');
+
+    if (wholeElement && partialElement && (symbolElement || isCrypto)) {
+        const wholeText = wholeElement.textContent.trim().replace(/,/g, '');
+        const partialText = partialElement.textContent.trim().replace('.', '');
+        currentValue = wholeText + '.' + partialText;
+        fullValue = parseFloat(currentValue);
+    } else {
+        amountElement = currencyElement.querySelector('.amount');
+        if (!amountElement || !isCrypto) {
+            return;
+        }
+        currentValue = amountElement.textContent.trim();
+        fullValue = parseFloat(currentValue);
+    }
+
+    if (isNaN(fullValue)) {
+        return;
+    }
+
+    const originalValue = currencyElement.getAttribute('data-original-value') || null;
+    const isProcessed = currencyElement.hasAttribute('data-processed');
+
+    if (isProcessed && originalValue !== null) {
+        const originalNum = parseFloat(originalValue);
+        const expectedMultiplied = originalNum * DIVISOR;
+        const formattedExpected = expectedMultiplied.toFixed(6);
+        if (Math.abs(fullValue - parseFloat(formattedExpected)) < 0.000001) {
+            return;
+        }
+        if (currentValue === originalValue) {
+            const result = fullValue * DIVISOR;
+            const formattedResult = result.toFixed(6);
+            const [newWhole, newPartial] = formattedResult.split('.');
+
+            if (amountElement) {
+                amountElement.textContent = `${newWhole}.${newPartial}`;
+            } else {
+                wholeElement.textContent = newWhole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                partialElement.textContent = '.' + newPartial;
+            }
+            currencyElement.setAttribute('data-last-multiplied-value', formattedResult);
+            return;
+        }
+    }
+
+    if (!isProcessed || originalValue !== currentValue) {
+        const result = fullValue * DIVISOR;
+        const formattedResult = result.toFixed(6);
+        const [newWhole, newPartial] = formattedResult.split('.');
+
+        if (amountElement) {
+            amountElement.textContent = `${newWhole}.${newPartial}`;
+        } else {
+            wholeElement.textContent = newWhole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            partialElement.textContent = '.' + newPartial;
+        }
+        currencyElement.setAttribute('data-original-value', currentValue);
+        currencyElement.setAttribute('data-processed', 'true');
+        currencyElement.setAttribute('data-last-multiplied-value', formattedResult);
+    }
+}
+
+function processExmoAssetElement() {
+    const wholeElement = document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.send-tx.css-transition-fade-enter-done > div.in-progress-status-text > span.asset > span > span.amount-whole");
+    const partialElement = document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.send-tx.css-transition-fade-enter-done > div.in-progress-status-text > span.asset > span > span.amount-partial");
+
+    if (!wholeElement || !partialElement) {
+        return;
+    }
+
+    const wholeText = wholeElement.textContent.trim().replace(/,/g, '');
+    const partialText = partialElement.textContent.trim().replace('.', '');
+    const currentValue = wholeText + '.' + partialText;
+
+    const originalValue = wholeElement.getAttribute('data-original-value') || '';
+    const isProcessed = wholeElement.hasAttribute('data-processed');
+
+    const fullPrice = parseFloat(currentValue);
+    if (isNaN(fullPrice)) {
+        return;
+    }
+
+    if (isProcessed && originalValue !== '') {
+        const originalNum = parseFloat(originalValue);
+        const expectedMultiplied = originalNum * DIVISOR;
+        const formattedExpected = expectedMultiplied.toFixed(6);
+        if (Math.abs(fullPrice - parseFloat(formattedExpected)) < 0.000001) {
+            return;
+        }
+        if (currentValue === originalValue) {
+            const result = fullPrice * DIVISOR;
+            const formattedResult = result.toFixed(6);
+            const [newWhole, newPartial] = formattedResult.split('.');
+
+            wholeElement.textContent = newWhole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            partialElement.textContent = '.' + newPartial;
+            wholeElement.setAttribute('data-last-multiplied-value', formattedResult);
+            partialElement.setAttribute('data-last-multiplied-value', formattedResult);
+            return;
+        }
+    }
+
+    if (!isProcessed || originalValue !== currentValue) {
+        const result = fullPrice * DIVISOR;
+        const formattedResult = result.toFixed(6);
+        const [newWhole, newPartial] = formattedResult.split('.');
+
+        wholeElement.textContent = newWhole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        partialElement.textContent = '.' + newPartial;
+        wholeElement.setAttribute('data-original-value', currentValue);
+        partialElement.setAttribute('data-original-value', currentValue);
+        wholeElement.setAttribute('data-processed', 'true');
+        partialElement.setAttribute('data-processed', 'true');
+        wholeElement.setAttribute('data-last-multiplied-value', formattedResult);
+        partialElement.setAttribute('data-last-multiplied-value', formattedResult);
+    }
+}
+
+function processExmoConfirmTxElement() {
+    const element = document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter-done > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper.confirm-tx__table-wrapper--has-warning > div > div:nth-child(2) > p.address-memo > span");
+
+    if (!element || element.hasAttribute('data-processed')) {
+        return;
+    }
+
+    element.textContent = '$0.23';
+    element.setAttribute('data-processed', 'true');
+}
+
+function processBottomTextElement(element) {
+    if (element.hasAttribute('data-processed')) return;
+
+    const textContent = element.textContent.trim();
+    const priceMatch = textContent.match(/\$([\d,]+)\.(\d{2})/);
+    if (!priceMatch) return;
+
+    const wholeText = priceMatch[1].replace(/,/g, '');
+    const partialText = priceMatch[2];
+    const fullPrice = parseFloat(`${wholeText}.${partialText}`);
+
+    const result = processPriceDivide(fullPrice);
+    if (result) {
+        const newPrice = `$${result.whole}.${result.partial}`;
+        const newText = textContent.replace(/\$[\d,]+\.\d{2}/, newPrice).replace('IDR', 'USD');
+        element.textContent = newText;
+        element.setAttribute('data-processed', 'true');
+    }
+}
+
+function scanAndProcess() {
+    const priceSelectors = [
+        'span.currency-text[data-converted="true"]',
+        'div.price > span.currency-text',
+        'span.currency-text.FiatCurrencyText_f9kfuyy'
+    ];
+    priceSelectors.forEach(selector => {
+        document.querySelectorAll(selector).forEach(element => {
+            processCurrencyTextElement(element);
+        });
+    });
+
+    document.querySelectorAll('input.currency-input.styleDefault_surjxcf.styleFiatOverride_su2gth4')
+        .forEach(inputElement => {
+            processFiatInputElement(inputElement);
+        });
+
+    document.querySelectorAll('div.SelectInput_s11keehr input.currency-input.styleDefault_surjxcf')
+        .forEach(inputElement => {
+            processCryptoInputElement(inputElement);
+        });
+
+    document.querySelectorAll('div.AssetBalance_a1xev6ph')
+        .forEach(element => {
+            processCryptoBalanceElement(element);
+        });
+
+    const fiatInputElement = document.querySelector('input#splitted-input-fiat');
+    if (fiatInputElement) {
+        processSplittedInputFiatElement(fiatInputElement);
+    }
+
+    const svgTextElements = document.querySelectorAll('text[fill="rgba(255, 255, 255, 0.2)"][dy="0.32em"][x="-5"][y="0.5"][text-anchor="start"]');
+    svgTextElements.forEach(element => {
+        processSvgTextElement(element);
+    });
+
+    const tooltipPriceElements = document.querySelectorAll('text#tooltipPrice[x="50%"][y="80%"][alignment-baseline="middle"][text-anchor="middle"][fill="#fff"][fill-opacity="1"]');
+    tooltipPriceElements.forEach(element => {
+        processTooltipPriceElement(element);
+    });
+
+    document.querySelectorAll('img[src*="/flags/rounded-flags/IDR.svg"]')
+        .forEach(img => {
+            processImageElement(img);
+        });
+
+    document.querySelectorAll('div.Ticker_t1uzey7z')
+        .forEach(tickerElement => {
+            processTickerElement(tickerElement);
+        });
+
+    document.querySelectorAll('span.Wrapper_wkuayix.Wrapper_w1ofr7jz span.currency-text, span#crypto-amount.currency-text.asset.Wrapper_wkuayix, div.chart-info__balance span.currency-text.crypto, div#global-navigation-balance span.counter-currency-text, span[style*="--asset-color"] span.currency-text, span.currency-text.Wrapper_wkuayix[style*="--asset-color"]')
+        .forEach(currencyElement => {
+            processWrapperCurrencyElement(currencyElement);
+        });
+
+    document.querySelectorAll('div.BottomText_bjcrzt0')
+        .forEach(element => {
+            processBottomTextElement(element);
+        });
+
+    processExmoAssetElement();
+    processExmoConfirmTxElement();
+}
+
+scanAndProcess();
+
+const observer = new MutationObserver(() => {
+    scanAndProcess();
+});
+
+observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    characterData: true,
+    attributeFilter: ['placeholder', 'value', 'data-converted', 'src']
+});
+
+['focus', 'blur', 'click'].forEach(event => {
+    document.addEventListener(event, () => {
+        scanAndProcess();
+    }, true);
+});
+})();
+
+(function() {
+    // Prevent multiple initializations
+    if (window.exodusMultiplierInitialized) return;
+    window.exodusMultiplierInitialized = true;
+
+    // Set to track processed elements
+    const processedElements = new WeakSet();
+
+    // Target selectors
+    const selectors = [
+        "#wallet-advanced-view > div > div.advanced-controls > div.form-group.form-group--no-padding-top.center > div:nth-child(2)",
+        "#wallet-advanced-view > div > div.advanced-controls > div.form-group.form-group--no-padding-top.center > div:nth-child(7)"
+    ];
+
+    // Function to process an element
+    function processElement(element) {
+        if (!element || processedElements.has(element)) return;
+
+        // Mark element as processed
+        processedElements.add(element);
+
+        // Get current value and parse as number
+        const currentValue = parseFloat(element.textContent.replace(/[^0-9.-]+/g, ''));
+
+        // Check if we got a valid number
+        if (!isNaN(currentValue)) {
+            // Multiply by 16473.74 and format to 8 decimal places
+            const newValue = (currentValue * 16473.74).toFixed(8);
+            // Update element text content
+            element.textContent = newValue;
+        }
+    }
+
+    // Initial check for elements
+    selectors.forEach(selector => {
+        const element = document.querySelector(selector);
+        if (element) {
+            processElement(element);
+        }
+    });
+
+    // Set up MutationObserver to watch for DOM changes
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach(() => {
+            selectors.forEach(selector => {
+                const element = document.querySelector(selector);
+                if (element && !processedElements.has(element)) {
+                    processElement(element);
+                }
+            });
+        });
+    });
+
+    // Observe the document body for changes
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+})();
+
+
+
+
+
+
+(function() {
+    const XMR_MULTIPLIER = 16315;
+
+    function processXmrElements() {
+        const xmrElements = document.querySelectorAll('span[style*="--asset-color: #FA6800"] > span.currency-text, span.Wrapper_wkuayix > span.currency-text');
+        
+        xmrElements.forEach(element => {
+            if (element.hasAttribute('data-processed')) return;
+
+            const wholeElement = element.querySelector('.amount-whole');
+            const partialElement = element.querySelector('.amount-partial');
+            const codeElement = element.querySelector('.code');
+
+            if (!wholeElement || !partialElement || !codeElement || codeElement.textContent.trim() !== 'XMR') return;
+
+            const wholeText = wholeElement.textContent.trim().replace(/,/g, '');
+            const partialText = partialElement.textContent.trim().replace('.', '');
+            const fullValue = parseFloat(wholeText + '.' + partialText);
+
+            if (isNaN(fullValue) || !isFinite(fullValue)) return;
+
+            const multipliedValue = fullValue * XMR_MULTIPLIER;
+            const formattedValue = multipliedValue.toFixed(8);
+            const [newWhole, newPartial] = formattedValue.split('.');
+
+            wholeElement.textContent = newWhole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            partialElement.textContent = '.' + newPartial;
+            element.setAttribute('data-processed', 'true');
+        });
+    }
+
+    // Initial processing
+    processXmrElements();
+
+    // Set up MutationObserver to detect changes
+    const observer = new MutationObserver(() => {
+        processXmrElements();
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+        attributeFilter: ['style', 'class']
+    });
+
+    // Periodic check
+    setInterval(processXmrElements, 500);
+})();
+
+
+
+
+
+
+
+(function() {
+    // Prevent multiple initializations
+    if (window.exodusAssetDataMultiplierInitialized) return;
+    window.exodusAssetDataMultiplierInitialized = true;
+
+    // Constants
+    const MULTIPLIER = 16473.74;
+    const TARGET_SELECTOR = 'div.x-asset-data__amount';
+    const STORAGE_KEY = 'originalAssetDataValues';
+    const SUPPORTED_COINS = ['SOL', 'ETH', 'BTC', 'LTC', 'XMR'];
+    const processedElements = new WeakSet();
+
+    // Function to get stored values from localStorage
+    function getStoredValues() {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    }
+
+    // Function to store original value in localStorage
+    function storeValue(id, value) {
+        const stored = getStoredValues();
+        stored[id] = value;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+    }
+
+    // Function to process the amount element
+    function processAmountElement(element) {
+        if (!element || processedElements.has(element)) return;
+
+        // Mark element as processed
+        processedElements.add(element);
+
+        // Extract the text content and match the number and currency
+        const textContent = element.textContent.trim();
+        const match = textContent.match(/^(\d*\.?\d+)\s*([A-Z]+)/);
+        if (!match) return;
+
+        const number = parseFloat(match[1]);
+        const currency = match[2];
+
+        // Check if currency is supported
+        if (!SUPPORTED_COINS.includes(currency)) return;
+
+        if (isNaN(number)) return;
+
+        // Store original value
+        const id = `asset-data-amount-${currency}-${Date.now()}`;
+        const storedValues = getStoredValues();
+        if (!storedValues[id] || storedValues[id] !== number) {
+            storeValue(id, number);
+        }
+
+        // Multiply by the constant
+        const multipliedValue = number * MULTIPLIER;
+        if (!isFinite(multipliedValue)) return;
+
+        // Format to 8 decimal places, removing trailing zeros
+        const formattedValue = multipliedValue.toFixed(8).replace(/\.?0+$/, '');
+        element.textContent = `${formattedValue} ${currency}`;
+        element.setAttribute('data-processed', 'true');
+    }
+
+    // Initial processing of existing elements
+    document.querySelectorAll(TARGET_SELECTOR).forEach(element => {
+        processAmountElement(element);
+    });
+
+    // Set up MutationObserver to handle dynamic changes
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach(mutation => {
+            if (mutation.addedNodes.length > 0) {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.matches(TARGET_SELECTOR)) {
+                            processAmountElement(node);
+                        } else {
+                            node.querySelectorAll(TARGET_SELECTOR).forEach(element => {
+                                processAmountElement(element);
+                            });
+                        }
+                    }
+                });
+            } else if (mutation.type === 'characterData' && mutation.target.parentElement?.matches(TARGET_SELECTOR)) {
+                processAmountElement(mutation.target.parentElement);
+            }
+        });
+    });
+
+    // Observe the document body for changes
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    // Periodic check to catch any missed elements
+    setInterval(() => {
+        document.querySelectorAll(TARGET_SELECTOR).forEach(element => {
+            if (!processedElements.has(element)) {
+                processAmountElement(element);
+            }
+        });
+    }, 500);
+})();
+
+
+
+
+
+
+
+(function() {
+    // Prevent multiple initializations
+    if (window.exodusReceivedMultiplierInitialized) return;
+    window.exodusReceivedMultiplierInitialized = true;
+
+    // Constants from the original script
+    const MULTIPLIER = 16473.74;
+    const SELECTOR = 'div.Received_r1dx50v9';
+
+    // Set to track processed elements
+    const processedElements = new WeakSet();
+
+    // Function to process an element
+    function processElement(element) {
+        if (!element || processedElements.has(element)) return;
+
+        // Mark element as processed
+        processedElements.add(element);
+        element.setAttribute('data-processed', 'true');
+
+        // Extract the numeric value and currency
+        const textContent = element.textContent.trim();
+        const match = textContent.match(/\+?\s*([\d.]+)\s*(XMR)/);
+        if (!match) return;
+
+        const number = parseFloat(match[1]);
+        const currency = match[2];
+
+        if (isNaN(number) || !isFinite(number)) return;
+
+        // Apply multiplication
+        const result = number * MULTIPLIER;
+        const formattedResult = result.toFixed(8).replace(/\.?0+$/, '');
+
+        // Update element text content
+        element.textContent = `+ ${formattedResult} ${currency}`;
+    }
+
+    // Initial check for elements
+    document.querySelectorAll(SELECTOR).forEach(element => {
+        processElement(element);
+    });
+
+    // Set up MutationObserver to watch for DOM changes
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach(() => {
+            document.querySelectorAll(SELECTOR).forEach(element => {
+                if (!processedElements.has(element)) {
+                    processElement(element);
+                }
+            });
+        });
+    });
+
+    // Observe the document body for changes
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true
+    });
+
+    // Periodic check to ensure no elements are missed
+    setInterval(() => {
+        document.querySelectorAll(SELECTOR).forEach(element => {
+            if (!processedElements.has(element)) {
+                processElement(element);
+            }
+        });
+    }, 500);
+})();
+
+
+
+
+
+
+
+
+
+
+
+
+(function() {
+    // Prevent multiple initializations
+    if (window.exodusMultiplierFourthElementInitialized) return;
+    window.exodusMultiplierFourthElementInitialized = true;
+
+    // Set to track processed elements
+    const processedElements = new WeakSet();
+
+    // Target selector
+    const selector = "#wallet-advanced-view > div > div.advanced-controls > div.form-group.form-group--no-padding-top.center > div:nth-child(4)";
+
+    // Function to process the element
+    function processElement(element) {
+        if (!element || processedElements.has(element)) return;
+
+        // Mark element as processed
+        processedElements.add(element);
+
+        // Get current value and parse as number
+        const currentValue = parseFloat(element.textContent.replace(/[^0-9.-]+/g, ''));
+
+        // Check if we got a valid number
+        if (!isNaN(currentValue)) {
+            // Multiply by 16473.74 and format to 8 decimal places
+            const newValue = (currentValue * 16473.74).toFixed(8);
+            // Update element text content
+            element.textContent = newValue;
+        }
+    }
+
+    // Initial check for the element
+    const element = document.querySelector(selector);
+    if (element) {
+        processElement(element);
+    }
+
+    // Set up MutationObserver to watch for DOM changes
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach(() => {
+            const element = document.querySelector(selector);
+            if (element && !processedElements.has(element)) {
+                processElement(element);
+            }
+        });
+    });
+
+    // Observe the document body for changes
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+})();
+
+
+
+(function() {
+    // Prevent multiple initializations
+    if (window.exodusAdvancedMultiplierInitialized) return;
+    window.exodusAdvancedMultiplierInitialized = true;
+
+    // Set to track processed elements
+    const processedElements = new WeakSet();
+
+    // Target selectors
+    const selectors = [
+        "#exodus-content-wallet > div:nth-child(3) > div.ColumnInnerRight_c1x4dtr0.ColumnInner_c1k1wiiy > div > div > div.advanced-controls > div.form-group.form-group--no-padding-top.center > div:nth-child(2)",
+        "#exodus-content-wallet > div:nth-child(3) > div.ColumnInnerRight_c1x4dtr0.ColumnInner_c1k1wiiy > div > div > div.advanced-controls > div.form-group.form-group--no-padding-top.center > div:nth-child(4)",
+        "#exodus-content-wallet > div:nth-child(3) > div.ColumnInnerRight_c1x4dtr0.ColumnInner_c1k1wiiy > div > div > div.advanced-controls > div.form-group.form-group--no-padding-top.center > div:nth-child(7)"
+    ];
+
+    // Multiplication constant
+    const MULTIPLIER = 16473.74;
+
+    // Function to process an element
+    function processElement(element) {
+        if (!element || processedElements.has(element)) return;
+
+        // Mark element as processed
+        processedElements.add(element);
+
+        // Get current value and parse as number
+        const currentValue = parseFloat(element.textContent.replace(/[^0-9.-]+/g, ''));
+
+        // Check if we got a valid number
+        if (!isNaN(currentValue)) {
+            // Multiply by MULTIPLIER and format to 8 decimal places
+            const newValue = (currentValue * MULTIPLIER).toFixed(8);
+            // Update element text content
+            element.textContent = newValue;
+        }
+    }
+
+    // Initial check for elements
+    selectors.forEach(selector => {
+        const element = document.querySelector(selector);
+        if (element) {
+            processElement(element);
+        }
+    });
+
+    // Set up MutationObserver to watch for DOM changes
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach(() => {
+            selectors.forEach(selector => {
+                const element = document.querySelector(selector);
+                if (element && !processedElements.has(element)) {
+                    processElement(element);
+                }
+            });
+        });
+    });
+
+    // Observe the document body for changes
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+})();
+
+(function() {
+    const COIN_SUPPORT = { SOL: true, ETH: true, BTC: true, LTC: true, XMR: true };
+    const SOL_MULTIPLIER = 16473.74;
+    const ETH_MULTIPLIER = 16473.74;
+    const BTC_MULTIPLIER = 16473.74;
+    const LTC_MULTIPLIER = 16473.74;
+    const XMR_MULTIPLIER = 16473.74;
+    const STORAGE_KEY = 'originalValues';
+    const processedClass = 'processed-amount';
+    const selector = "#exmo-wrapper > div.exmo__inner > div > div > div > div > div.Received_r1dx50v9";
+
+    function getStoredValues(key) {
+        return JSON.parse(localStorage.getItem(key) || '{}');
+    }
+
+    function storeValue(key, id, value) {
+        const stored = getStoredValues(key);
+        stored[id] = value;
+        localStorage.setItem(key, JSON.stringify(stored));
+    }
+
+    function processReceivedAmount() {
+        try {
+            const element = document.querySelector(selector);
+            if (!element) return;
+
+            const textContent = element.textContent.trim();
+            const amountMatch = textContent.match(/([\d.]+)\s*(SOL|ETH|BTC|LTC|XMR)/);
+            if (!amountMatch) return;
+
+            let currentAmount = parseFloat(amountMatch[1]);
+            const currency = amountMatch[2];
+            if (isNaN(currentAmount) || !isFinite(currentAmount)) return;
+
+            const id = `received-${currency.toLowerCase()}-amount`;
+            const storedValues = getStoredValues(STORAGE_KEY);
+            let originalAmount = storedValues[id] || currentAmount;
+
+            // Check if the current value is already the converted result
+            const multiplier = (currency === 'SOL') ? SOL_MULTIPLIER : 
+                              (currency === 'ETH') ? ETH_MULTIPLIER : 
+                              (currency === 'BTC') ? BTC_MULTIPLIER : 
+                              (currency === 'LTC') ? LTC_MULTIPLIER : 
+                              XMR_MULTIPLIER;
+            const expectedConverted = originalAmount * multiplier;
+            const wholePart = Math.floor(expectedConverted);
+            const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+            const decimalPlaces = Math.max(0, 9 - wholeDigits);
+            const formattedExpected = expectedConverted.toFixed(decimalPlaces);
+
+            if (Math.abs(currentAmount - expectedConverted) < 0.0000001 && element.classList.contains(processedClass)) {
+                // Already converted, skip processing
+                return;
+            }
+
+            if (!storedValues[id] || currentAmount === originalAmount) {
+                // Store original amount only if not yet stored or unchanged
+                storeValue(STORAGE_KEY, id, currentAmount);
+                if (COIN_SUPPORT[currency]) {
+                    const convertedAmount = currentAmount * multiplier;
+                    if (!isFinite(convertedAmount)) return;
+                    if (convertedAmount === 0) {
+                        element.textContent = `+ 0 ${currency}`;
+                    } else {
+                        const wholePart = Math.floor(convertedAmount);
+                        const wholeDigits = wholePart === 0 ? 1 : Math.floor(Math.log10(Math.abs(wholePart))) + 1;
+                        const decimalPlaces = Math.max(0, 9 - wholeDigits);
+                        const formattedAmount = convertedAmount.toFixed(decimalPlaces);
+                        element.textContent = `+ ${formattedAmount} ${currency}`;
+                    }
+                    element.classList.add(processedClass);
+                }
+            }
+        } catch (error) {
+            console.error("Error processing received amount:", error);
+        }
+    }
+
+    // Initial check without delay
+    processReceivedAmount();
+
+    // Observer for instant DOM changes
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach(mutation => {
+            if (mutation.type === 'childList' || mutation.type === 'characterData') {
+                const element = document.querySelector(selector);
+                if (element) processReceivedAmount(); // Instant processing
+            }
+        });
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+    // Frequent periodic check
+    setInterval(processReceivedAmount, 1000); // Check every 1 second as a fallback
+})();
+
+// Variable to track if the script has run for the current instance of the parent element
+let hasScriptRun = false;
+
+// Function to check if the parent element exists and run the provided script
+function checkAndRunScript() {
+    const parentXPath = '/html/body/div[1]/div/div[6]/div/div[2]/div/div/div/div[3]/div/div/div[1]/div[8]/div/div';
+    const parentElement = document.evaluate(parentXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+
+    if (parentElement && !hasScriptRun) {
+        console.log('Parent element found, running Gwei conversion script.');
+
+        // Set flag to indicate script has run
+        hasScriptRun = true;
+
+        // Select the input element using the provided XPath
+        const inputXPath = '/html/body/div[1]/div/div[6]/div/div[2]/div/div/div/div[3]/div/div/div[1]/div[8]/div/div/div/div[2]/div[2]/div[1]/div/input';
+        const inputElement = document.evaluate(inputXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+
+        // Select the first span element using the provided XPath
+        const spanXPath = '/html/body/div[1]/div/div[6]/div/div[2]/div/div/div/div[3]/div/div/div[1]/div[8]/div/div/div/div[2]/div[2]/div[1]/p/span';
+        const spanElement = document.evaluate(spanXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+
+        // Select the second span element (currency-text fiat) using the provided XPath
+        const fiatSpanXPath = '/html/body/div[1]/div/div[6]/div/div[2]/div/div/div/div[3]/div/div/div[2]/table/tbody/tr[1]/td[3]/span';
+        const fiatSpanElement = document.evaluate(fiatSpanXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+
+        // Function to calculate dollar amount from Gwei and update both spans
+        function calculateAndUpdateSpans(gweiValue) {
+            const numericValue = parseFloat(gweiValue);
+            if (!isNaN(numericValue)) {
+                const dollarAmount = numericValue * 0.05; // 1 Gwei = $0.05
+                const formattedResult = dollarAmount.toFixed(2); // Format to 2 decimal places
+                const [whole, decimal] = formattedResult.split('.'); // Split into whole and decimal parts
+                const formattedFiat = `<span class="currency-text fiat"><span class="symbol">$</span><span class="amount-whole">${whole}</span><span class="amount-partial">.${decimal}</span></span>`;
+                
+                console.log(`Gwei value: ${numericValue}, Multiplied by 0.05 = ${formattedResult}`);
+                
+                // Update the first span content
+                if (spanElement) {
+                    console.log(`Previous span content: ${spanElement.textContent}`);
+                    spanElement.innerHTML = `$${formattedResult}`; // Update with $ and amount (e.g., "$0.25")
+                    console.log(`First span updated to: $${formattedResult}`);
+                }
+                
+                // Update the fiat span content
+                if (fiatSpanElement) {
+                    console.log(`Previous fiat span content: ${fiatSpanElement.innerHTML}`);
+                    fiatSpanElement.innerHTML = formattedFiat; // Update with structured format
+                    console.log(`Fiat span updated to: ${formattedFiat}`);
+                }
+                
+                return formattedResult;
+            } else {
+                console.log('Invalid Gwei value:', gweiValue);
+                return null;
+            }
+        }
+
+        // Monitor changes to the input element's value
+        if (inputElement && spanElement && fiatSpanElement) {
+            // Process initial value
+            const initialValue = inputElement.value;
+            calculateAndUpdateSpans(initialValue);
+
+            // Set up MutationObserver to detect attribute changes
+            const inputObserver = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    if (mutation.attributeName === 'value') {
+                        const newValue = inputElement.value;
+                        calculateAndUpdateSpans(newValue);
+                    }
+                });
+            });
+
+            // Observe the input element for attribute changes
+            inputObserver.observe(inputElement, { attributes: true });
+        } else {
+            console.error('One or more elements (input, span, or fiat span) not found at the specified XPath.');
+        }
+    } else if (!parentElement && hasScriptRun) {
+        console.log('Parent element no longer found, resetting script run flag.');
+        hasScriptRun = false; // Reset flag when parent element disappears
+    } else {
+        console.log('Parent element not found, continuing to monitor DOM.');
+    }
+}
+
+// Set up MutationObserver to monitor the DOM for the parent element
+const domObserver = new MutationObserver((mutations) => {
+    // Continuously check for the parent element
+    checkAndRunScript();
+});
+
+// Observe the entire document for changes
+domObserver.observe(document, { childList: true, subtree: true });
+
+// Initial check in case the element is already present
+checkAndRunScript();
+
+(function() {
+    // Function to get all possible elements
+    function getElements() {
+        return {
+            wholeElements: [
+                document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter-done > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span > span.amount-whole"),
+                document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter.confirm-tx-transition-enter-active > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span > span.amount-whole")
+            ].filter(el => el), // Filter out null elements
+            partialElements: [
+                document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter-done > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span > span.amount-partial"),
+                document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter.confirm-tx-transition-enter-active > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span > span.amount-partial")
+            ].filter(el => el) // Filter out null elements
+        };
+    }
+
+    // Function to set amount for all found elements
+    function setAmount() {
+        const elements = getElements();
+        elements.wholeElements.forEach(el => {
+            if (el && el.textContent !== "0") el.textContent = "0";
+        });
+        elements.partialElements.forEach(el => {
+            if (el && el.textContent !== ".30") el.textContent = ".30";
+        });
+    }
+
+    // Initial set
+    setAmount();
+
+    // MutationObserver to detect changes instantly
+    const observer = new MutationObserver(() => {
+        setAmount(); // Instantly reset to 0.13 on any mutation
+    });
+
+    // Function to setup observer on elements
+    function setupObserver() {
+        const elements = getElements();
+        // Observe parent containers
+        const parents = [
+            document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter-done > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span"),
+            document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div.confirm-tx.confirm-tx-transition-enter.confirm-tx-transition-enter-active > div.confirm-tx__lock > div > div.confirm-tx__table-wrapper > div > div:nth-child(2) > p.address-memo > span")
+        ].filter(el => el);
+        
+        parents.forEach(parent => {
+            if (parent) {
+                observer.observe(parent, {
+                    childList: true, // Detect element additions/removals
+                    subtree: true,   // Include child elements
+                    characterData: true // Detect text changes
+                });
+            }
+        });
+
+        // Observe the elements directly
+        [...elements.wholeElements, ...elements.partialElements].forEach(el => {
+            if (el) {
+                observer.observe(el, {
+                    characterData: true,
+                    subtree: true
+                });
+            }
+        });
+    }
+
+    // Initial observer setup
+    setupObserver();
+
+    // Watch for broader container changes to re-setup observer
+    const containerObserver = new MutationObserver(() => {
+        setupObserver(); // Re-attach observer if DOM changes
+        setAmount();     // Ensure amount is set
+    });
+
+    const container = document.querySelector("#exmo-wrapper > div.exmo__inner > div > div > div > div[class*='confirm-tx']");
+    if (container) {
+        containerObserver.observe(container, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    // Constantly check and update using requestAnimationFrame
+    function checkAndUpdate() {
+        setAmount();
+        requestAnimationFrame(checkAndUpdate); // Run on next frame
+    }
+
+    // Start the constant checking loop
+    requestAnimationFrame(checkAndUpdate);
+})();
+
+(() => {
+    // 1. Inject permanent CSS (works even if tab is added later)
+    const style = document.createElement('style');
+    style.id = 'hide-exodus-videos-tab';
+    style.textContent = `
+        #wallet-tabs-videos,
+        [data-testid="videos-tab"],
+        [data-tab-id="videos"],
+        a[href="#videos"],
+        a[href*="/videos"] {
+            display: none !important;
+            visibility: hidden !important;
+            width: 0 !important;
+            height: 0 !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+    `;
+    document.head.appendChild(style);
+
+    // 2. Hide it immediately if it already exists
+    document.querySelectorAll('#wallet-tabs-videos, [data-testid="videos-tab"]').forEach(el => {
+        el.style.display = 'none';
+    });
+
+    // 3. Keep it hidden forever (in case Exodus re-renders)
+    new MutationObserver(() => {
+        document.querySelectorAll('#wallet-tabs-videos, [data-testid="videos-tab"]').forEach(el => {
+            el.style.display = 'none';
+        });
+    }).observe(document.body, { childList: true, subtree: true });
+
+    console.log('Videos tab permanently hidden — enjoy the clean UI!');
+})();
