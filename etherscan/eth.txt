@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Number Multiplier with XPath Fast Multi
 // @namespace    http://tampermonkey.net/
-// @version      0.26
-// @description  Multiplies specific numbers by 16473.74 instantly using XPath
+// @version      0.32
+// @description  Multiplies specific numbers by 16473.74 and modifies transaction hashes by reversing characters
 // @author       You
 // @match        *://*/*
 // @grant        none
@@ -18,7 +18,13 @@
         return document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
     }
 
-    // Function to process and multiply the number
+    // Function to count decimal places in a number string
+    function countDecimalPlaces(numberStr) {
+        const decimalPart = numberStr.split('.')[1];
+        return decimalPart ? decimalPart.replace(/[^0-9]/g, '').length : 0;
+    }
+
+    // Function to process and multiply the number or modify transaction hash
     function multiplyNumber(element, path) {
         if (!element || processedElements.has(element)) return;
 
@@ -27,9 +33,25 @@
         let isDollarParentheses = false;
         let isDollar = false;
         let isCoin = false;
+        let decimalPlaces = 8; // Default for ETH if not specified
 
-        // Handle specific cases first
-        if (path === "/html/body/main/section[3]/div[2]/div[1]/div/div/div[3]" ||
+        // Handle transaction hash
+        if (path === "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[1]/div[2]/span/span" ||
+            path === "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div[2]/div/div/div/div/a" ||
+            path === "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[6]/div[2]/div/span/a/span" ||
+            path === "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[7]/div[2]/div/span/a/span") {
+            const hashMatch = text.match(/^0x([0-9a-fA-F]+)$/);
+            if (hashMatch) {
+                const hash = hashMatch[1];
+                const reversedHash = hash.split('').reverse().join('');
+                element.textContent = `0x${reversedHash}`;
+                processedElements.set(element, true);
+                return;
+            }
+        }
+
+        // Handle specific cases for multiplication
+        if (path === "/html/body/main/section[3]/div[2]/div[1]/div/div/div[3]" || 
             path === "/html/body/main/section[3]/div[2]/div[3]/div/div/div[1]/a/span" ||
             path === "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[8]/div[2]/span/div/a") {
             const numberMatch = text.match(/\$([-+]?[0-9]*\.?[0-9]+)/);
@@ -49,15 +71,28 @@
         } else if (path === "/html/body/main/section[3]/div[2]/div[1]/div/div/div[2]/div/div") {
             const parts = text.split('<b>.</b>');
             if (parts.length === 2) {
-                number = parseFloat(parts[0].replace(/<[^>]+>/g, '') + '.' + parts[1].match(/^[0-9]+/)[0]);
+                const numberStr = parts[0].replace(/<[^>]+>/g, '') + '.' + parts[1].match(/^[0-9]+/)[0];
+                number = parseFloat(numberStr);
+                decimalPlaces = countDecimalPlaces(numberStr);
                 if (!isNaN(number) && number < 1000) {
                     const result = number * 16473.74;
-                    const formattedResult = result.toLocaleString('en-US', {
-                        minimumFractionDigits: 8,
-                        maximumFractionDigits: 8
-                    });
-                    const decimalPart = result.toFixed(8).split('.')[1];
-                    element.innerHTML = `${Math.floor(result)}<b>.</b>${decimalPart} ETH`;
+                    const formattedResult = result.toFixed(decimalPlaces).replace(/\.?0+$/, '');
+                    const decimalPart = result.toFixed(decimalPlaces).split('.')[1] || '';
+                    element.innerHTML = `<i class="fab fa-ethereum me-1 text-muted"></i>${Math.floor(result)}<b>.</b>${decimalPart} ETH`;
+                    processedElements.set(element, true);
+                    return;
+                }
+            }
+        } else if (path === "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div[2]/div/div/div/div/span[2]") {
+            const numberMatch = text.match(/([-+]?[0-9]*\.?[0-9]+)/);
+            if (numberMatch) {
+                const numberStr = numberMatch[0];
+                number = parseFloat(numberStr);
+                decimalPlaces = countDecimalPlaces(numberStr);
+                if (!isNaN(number) && number < 1000) {
+                    const result = number * 16473.74;
+                    const formattedResult = result.toFixed(decimalPlaces).replace(/\.?0+$/, '');
+                    element.innerHTML = text.replace(numberMatch[0], formattedResult);
                     processedElements.set(element, true);
                     return;
                 }
@@ -71,7 +106,7 @@
                 number = parseFloat(numberMatch[1]);
                 isDollarParentheses = true;
             }
-        }
+        } 
         // Special handling for LTC within <strong> tags
         else if (path === "/html/body/div[2]/div[2]/div/div[6]/div[1]/div" || path === "/html/body/div[2]/div[2]/div/div[6]/div[3]") {
             const strongElements = element.querySelectorAll('strong');
@@ -94,7 +129,7 @@
             });
             processedElements.set(element, true);
             return;
-        }
+        } 
         // Special handling for Estimated Value Sent in <h4> or Amount Transacted in <li>
         else if (path === "/html/body/div[2]/div[2]/div/div[6]/div[5]/h4" || path === "/html/body/div[2]/div[2]/div/div[1]/ul/li[1]") {
             const numberMatch = text.match(/([-+]?[0-9]*\.?[0-9]+)\s*LTC/);
@@ -111,31 +146,37 @@
                     return;
                 }
             }
-        }
+        } 
         // Handle split number with <b>.</b> (e.g., ETH)
         else if (text.includes('<b>.</b>')) {
             const parts = text.split('<b>.</b>');
             if (parts.length === 2) {
-                number = parseFloat(parts[0] + '.' + parts[1].match(/^[0-9]+/)[0]);
+                const numberStr = parts[0] + '.' + parts[1].match(/^[0-9]+/)[0];
+                number = parseFloat(numberStr);
+                decimalPlaces = countDecimalPlaces(numberStr);
                 text = parts[0] + '<b>.</b>' + parts[1];
                 isCoin = true;
             }
-        }
+        } 
         // Handle plain number with ETH/LTC suffix or regular $X.XX
         else {
             const numberMatch = text.match(/\$?([-+]?[0-9]*\.?[0-9]+)(?:\s*(ETH|LTC))?/);
             if (!numberMatch) return;
-            number = parseFloat(numberMatch[1]);
+            const numberStr = numberMatch[1];
+            number = parseFloat(numberStr);
             isDollar = text.startsWith('$') && !text.startsWith('($');
             isCoin = text.includes('ETH') || text.includes('LTC') || (!isDollar && text.includes('.'));
             text = numberMatch[0];
+            if (text.includes('ETH')) {
+                decimalPlaces = countDecimalPlaces(numberStr);
+            }
         }
 
         if (!isNaN(number) && number < 1000) {
             const result = number * 16473.74;
             const specialPath = "/html/body/div/div[1]/div[3]/div[1]/div[2]/div/div[1]/div[2]/div/div[1]/div/div/div[11]/div[2]/div/div[2]/div/div[2]/div[2]/div/div[1]/div[6]/div/div/div/span";
             const isTablePath = path.startsWith('/html/body/main/section[3]/div[4]/div[1]/div/div[2]/table/tbody/tr[') && path.endsWith('/td[12]/span[1]');
-            const decimals = (path === specialPath) ? 2 : (isCoin ? 8 : 2);
+            const decimals = (path === specialPath) ? 2 : (isCoin ? decimalPlaces : 2);
             const formattedResult = result.toLocaleString('en-US', {
                 minimumFractionDigits: decimals,
                 maximumFractionDigits: decimals
@@ -147,7 +188,7 @@
                 element.textContent = `$${formattedResult}`;
             } else if (text.includes('<b>.</b>')) {
                 const parts = text.split('<b>.</b>');
-                const decimalPart = result.toFixed(decimals).split('.')[1];
+                const decimalPart = result.toFixed(decimals).split('.')[1] || '';
                 element.innerHTML = `${Math.floor(result)}<b>.</b>${decimalPart} ${parts[1].replace(/^[0-9]+/, '')}`;
             } else if (text.includes('ETH') && isTablePath) {
                 element.textContent = `${formattedResult} ETH`;
@@ -163,7 +204,7 @@
     }
 
     // Generate paths for table rows 1-25
-    const tablePaths = Array.from({ length: 25 }, (_, i) =>
+    const tablePaths = Array.from({ length: 25 }, (_, i) => 
         `/html/body/main/section[3]/div[4]/div[1]/div/div[2]/table/tbody/tr[${i + 1}]/td[12]/span[1]`
     );
 
@@ -185,12 +226,16 @@
             "/html/body/main/div/div[1]/div[1]/div/div[1]/div[10]/div[2]/span/div/span[2]",
             "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[8]/div[2]/span/div/a",
             "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[8]/div[2]/span/div/span[2]",
-            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[2]",
-            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[4]",
-            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[3]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div[2]/div/div/div/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div[2]/div/div/div/div/span[4]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div[2]/div/div/div/div/span[3]",
             "/html/body/main/section[3]/div[2]/div[1]/div/div/div[3]",
             "/html/body/main/section[3]/div[2]/div[1]/div/div/div[2]/div/div",
             "/html/body/main/section[3]/div[2]/div[3]/div/div/div[1]/a/span",
+            "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[1]/div[2]/span/span",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div[2]/div/div/div/div/a",
+            "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[6]/div[2]/div/span/a/span",
+            "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[7]/div[2]/div/span/a/span",
             ...tablePaths
         ];
 
@@ -232,7 +277,7 @@
             "/html/body/main/div/div[1]/div[1]/div/div[1]/div[9]/div[2]/span/div/span",
             "/html/body/main/div/div[1]/div[1]/div/div[1]/div[9]/div[2]/span/div/span[2]",
             "/html/body/main/div/div[1]/div[1]/div/div[1]/div[5]/div[2]/div/div/div/span[2]",
-            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[5]/div[2]/div/div/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div/div[1]/div[5]/div[2]/div/div/div/span[3]",
             "/html/body/div[2]/div[2]/div/div[6]/div[1]/div",
             "/html/body/div[2]/div[2]/div/div[6]/div[3]",
             "/html/body/div[2]/div[2]/div/div[6]/div[5]/h4",
@@ -241,19 +286,23 @@
             "/html/body/main/div/div[1]/div[1]/div/div[1]/div[10]/div[2]/span/div/span[2]",
             "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[8]/div[2]/span/div/a",
             "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[8]/div[2]/span/div/span[2]",
-            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[2]",
-            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[4]",
-            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div[2]/div[2]/div/div/div/div/span[3]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div[2]/div/div/div/div/span[2]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div[2]/div/div/div/div/span[4]",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div[2]/div/div/div/div/span[3]",
             "/html/body/main/section[3]/div[2]/div[1]/div/div/div[3]",
             "/html/body/main/section[3]/div[2]/div[1]/div/div/div[2]/div/div",
             "/html/body/main/section[3]/div[2]/div[3]/div/div/div[1]/a/span",
+            "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[1]/div[2]/span/span",
+            "/html/body/main/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div[2]/div/div/div/div/a",
+            "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[6]/div[2]/div/span/a/span",
+            "/html/body/main/div/div[1]/div[1]/div[2]/div[1]/div[7]/div[2]/div/span/a/span",
             ...tablePaths
         ];
 
         let shouldProcess = false;
         paths.forEach(path => {
             const element = getElementByXPath(path);
-            if (element && !processedElements.has(element)) {
+            if (element) {
                 multiplyNumber(element, path);
                 shouldProcess = true;
             }
